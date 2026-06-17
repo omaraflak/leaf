@@ -2,25 +2,35 @@
 
 A lightweight Python protocol for bringing up a peer-to-peer mesh network over raw radio transceivers. 
 
-## Code Architecture
+## How it works
 
-The codebase is split into modular layers:
-1. `transceiver.py` & `mock_transceiver.py`: The physical layer. Represents the raw radio hardware, simulating collisions, hardware delays, and propagation distance.
-2. `frame.py`: The data-link layer. Handles packing, unpacking, parsing, and verifying (CRC32) binary packets (`MeshFrame`).
-3. `mesh_protocol.py`: The network layer. Handles the routing logic, route discovery, message ACKs, and deduplication.
+The protocol combines several techniques to deliver messages reliably across a network of nodes that can only talk to their immediate neighbors.
 
-## How it works (The Algorithms)
+### CSMA/CA (Carrier-Sense Multiple Access with Collision Avoidance)
 
-Our protocol uses two main algorithms to ensure messages reach their destination reliably across multiple devices:
+Also known as "Listen Before Talk". Before a node transmits, it listens to the antenna. If it hears another node talking, it waits for a random exponential backoff period before trying again. This drastically reduces radio wave collisions and allows the network to scale without scrambling packets.
 
-1. **CSMA/CA (Carrier-Sense Multiple Access with Collision Avoidance)**: 
-   Also known as "Listen Before Talk". Before a node transmits data, it listens to the antenna. If it hears another node talking, it waits for a random exponential backoff period before trying again. This drastically reduces radio wave collisions and allows the network to scale without scrambling packets.
+### AODV Routing (Ad hoc On-Demand Distance Vector)
 
-2. **AODV Routing (Ad hoc On-Demand Distance Vector)**: 
-   Instead of blindly flooding data packets everywhere, nodes establish precise paths on-demand. 
-   - **Route Request (RREQ)**: When a node wants to send data, it floods a tiny RREQ packet. 
-   - **Route Reply (RREP)**: When the destination hears it, it sends an RREP backwards along the discovered path. 
-   - Once the path is locked in, the heavy `DATA` packets are sent *only* along that precise sequence of nodes. Intermediate nodes act as relays.
+Instead of blindly flooding data packets everywhere, nodes establish precise paths on-demand:
+
+- **Route Request (RREQ)**: When a node wants to send data to a destination it doesn't have a route to, it floods a small RREQ packet across the network.
+- **Route Reply (RREP)**: When the destination hears the RREQ, it sends an RREP back along the discovered path.
+- Once the path is established, DATA packets are sent *only* along that precise chain of nodes. Intermediate nodes act as relays.
+
+Routes are cached for 5 minutes. If a route expires or breaks (detected by a failed ACK), the node automatically re-discovers a new path.
+
+### End-to-End ACKs with Retries
+
+When a node sends a unicast message, it waits for an acknowledgment (ACK) from the final destination. If the ACK doesn't arrive within a timeout, it clears the cached route and retries with a fresh route discovery. This provides reliable delivery — `send_message` returns `True` only when the destination has confirmed receipt.
+
+### Message Deduplication
+
+Every frame carries an `(origin, sequence_number, type)` tuple. Nodes track recently seen messages and silently drop duplicates. This is essential for RREQ flooding to work correctly — without it, a single RREQ would loop endlessly through the network.
+
+### Route Discovery Coalescing
+
+If multiple messages target the same destination before a route is established, only a single RREQ is broadcast. All pending senders wait on the same discovery and share the result, avoiding redundant floods.
 
 ## Minimal Example
 
@@ -59,3 +69,4 @@ async def main():
 
 asyncio.run(main())
 ```
+
