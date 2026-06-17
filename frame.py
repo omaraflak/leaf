@@ -1,5 +1,6 @@
 import struct
 import binascii
+from typing import Optional
 
 
 class FrameType:
@@ -101,3 +102,48 @@ class MeshFrame:
     return cls(
         f_type, ttl, seq, orig_src, final_dest, transmitter, next_hop, payload
     )
+
+  @classmethod
+  def parse_from_buffer(cls, buffer: bytearray) -> tuple[Optional["MeshFrame"], int]:
+    """
+    Parses a MeshFrame from a streaming bytearray buffer.
+    Returns:
+      (frame, bytes_consumed):
+        - If a frame is successfully parsed, frame is MeshFrame, bytes_consumed is total_frame_size.
+        - If a frame is incomplete, frame is None, bytes_consumed is 0.
+        - If the buffer starts with invalid bytes (no magic), frame is None, bytes_consumed is number of skipped bytes.
+    """
+    if not buffer:
+      return None, 0
+
+    magic_idx = buffer.find(cls.MAGIC)
+    if magic_idx == -1:
+      # No magic found, discard the entire buffer
+      return None, len(buffer)
+
+    if magic_idx > 0:
+      # Discard everything before the magic bytes
+      return None, magic_idx
+
+    if len(buffer) < cls.HEADER_SIZE:
+      return None, 0
+
+    try:
+      header_data = struct.unpack(cls.HEADER_FMT, buffer[: cls.HEADER_SIZE])
+      payload_len = header_data[8]
+      total_frame_size = cls.HEADER_SIZE + payload_len + 4
+
+      if len(buffer) < total_frame_size:
+        # Incomplete frame
+        return None, 0
+
+      frame_data = bytes(buffer[:total_frame_size])
+      frame = cls.unpack(frame_data)
+      if frame is None:
+        # Unpack failed (e.g. CRC mismatch), discard the first byte of magic to try again
+        return None, 1
+
+      return frame, total_frame_size
+    except struct.error:
+      # Header formatting error, discard first byte to recover
+      return None, 1

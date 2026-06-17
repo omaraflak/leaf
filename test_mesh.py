@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import time
 import unittest
 from frame import FrameType
@@ -8,8 +9,13 @@ from mesh_protocol import MeshProtocol
 
 class TestMeshNetwork(unittest.IsolatedAsyncioTestCase):
   def setUp(self):
+    # Suppress noisy log output from expected failures (e.g. test_out_of_range)
+    logging.disable(logging.CRITICAL)
     # Create a fast medium for testing (10000 bytes/sec means very short delays)
     self.medium = MockMedium(max_range_m=3000, bytes_per_sec=10000)
+
+  def tearDown(self):
+    logging.disable(logging.NOTSET)
 
   def _create_node(self, x, y, name):
     tx = MockTransceiver(self.medium, x=x, y=y, name=name)
@@ -184,6 +190,44 @@ class TestMeshNetwork(unittest.IsolatedAsyncioTestCase):
     senders = {msg[0] for msg in rec_b}
     self.assertIn("Node_A", senders)
     self.assertIn("Node_C", senders)
+
+  async def test_route_discovery_coalescing(self):
+    # A -> B -> C
+    # We want to measure the number of RREQs broadcast by A.
+    # To do this, we intercept self.medium.transmit.
+    rreq_count = 0
+    original_transmit = self.medium.transmit
+
+    async def intercept_transmit(sender, data):
+      nonlocal rreq_count
+      from frame import MeshFrame
+      frame = MeshFrame.unpack(data)
+      if frame and frame.frame_type == FrameType.RREQ and sender.name == "Node_A":
+        rreq_count += 1
+      await original_transmit(sender, data)
+
+    self.medium.transmit = intercept_transmit
+
+    proto_a, rec_a = self._create_node(0, 0, "Node_A")
+    proto_b, rec_b = self._create_node(2000, 0, "Node_B")
+    proto_c, rec_c = self._create_node(4000, 0, "Node_C")
+
+    # Send 3 concurrent messages from A to C before route is known
+    results = await asyncio.gather(
+        proto_a.send_message("Node_C", b"Msg 1", timeout=5.0),
+        proto_a.send_message("Node_C", b"Msg 2", timeout=5.0),
+        proto_a.send_message("Node_C", b"Msg 3", timeout=5.0),
+        return_exceptions=True
+    )
+
+    # Check they were all successfully delivered
+    for res in results:
+      self.assertTrue(res)
+
+    # Without coalescing, A would transmit 3 RREQs (one for each message).
+    # With coalescing, A should only transmit 1 RREQ.
+    self.assertEqual(
+        rreq_count, 1, f"Expected exactly 1 RREQ broadcast, got {rreq_count}")
 
 
 if __name__ == "__main__":

@@ -1,7 +1,10 @@
 import asyncio
+import logging
 import random
 from typing import Callable, Awaitable
 from transceiver import Transceiver
+
+logger = logging.getLogger("leaf.mock_transceiver")
 
 
 class MockMedium:
@@ -19,7 +22,8 @@ class MockMedium:
     self.transceivers.append(transceiver)
 
   async def transmit(self, sender: "MockTransceiver", data: bytes):
-    """Simulates transmission of data. Calculates duration based on mock baud rate."""
+    """Simulates transmission of data. Blocks for the transmission duration
+    to model the sender's half-duplex radio being busy while pushing bits."""
     duration = len(data) / self.bytes_per_sec
 
     receivers_in_range = [
@@ -32,12 +36,11 @@ class MockMedium:
     for r in receivers_in_range:
       r._air_signal_start(data)
 
-    async def finish():
+    try:
       await asyncio.sleep(duration)
+    finally:
       for r in receivers_in_range:
         await r._air_signal_end(data)
-
-    asyncio.create_task(finish())
 
   def _distance(self, t1: "MockTransceiver", t2: "MockTransceiver") -> float:
     return ((t1.x - t2.x) ** 2 + (t1.y - t2.y) ** 2) ** 0.5
@@ -57,6 +60,7 @@ class MockTransceiver(Transceiver):
 
     # State for receiving: id(data) -> {"data": data, "collided": bool}
     self.active_signals: dict[int, dict] = {}
+    self._background_tasks: set[asyncio.Task] = set()
 
     self.medium.register(self)
 
@@ -96,7 +100,9 @@ class MockTransceiver(Transceiver):
           await asyncio.sleep(0.005)  # Simulated processing delay
           await self.callback(received_data)
 
-        asyncio.create_task(delayed_callback())
+        task = asyncio.create_task(delayed_callback())
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
     else:
       # Signal was mangled by a collision. Pass garbage to simulate noise.
       garbage = bytes(random.randint(0, 255) for _ in range(len(data)))
@@ -106,4 +112,6 @@ class MockTransceiver(Transceiver):
           await asyncio.sleep(0.005)
           await self.callback(garbage)
 
-        asyncio.create_task(delayed_callback_garbage())
+        task = asyncio.create_task(delayed_callback_garbage())
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)

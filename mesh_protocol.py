@@ -1,10 +1,13 @@
 import asyncio
-import time
+import logging
 import random
 import struct
+import time
 from typing import Callable
-from transceiver import Transceiver
 from frame import FrameType, MeshFrame
+from transceiver import Transceiver
+
+logger = logging.getLogger("leaf.mesh")
 
 
 class MeshProtocol:
@@ -29,19 +32,23 @@ class MeshProtocol:
     # routing_table[dest] = (next_hop, hops, expiry)
     self.routing_table: dict[bytes, tuple[bytes, int, float]] = {}
 
-    # (orig_src, seq, f_type)
-    self.seen_messages: set[tuple[bytes, int, int]] = set()
+    # (orig_src, seq, f_type) -> timestamp
+    self.seen_messages: dict[tuple[bytes, int, int], float] = {}
 
     # (dest, seq) -> event
     self.pending_acks: dict[tuple[bytes, int], asyncio.Event] = {}
 
-    # dest -> event
-    self.route_events: dict[bytes, asyncio.Event] = {}
+    # dest -> event (active route discoveries)
+    self._active_discoveries: dict[bytes, asyncio.Event] = {}
 
     self.on_message_callback: Callable[[str, bytes], None] | None = None
 
     # Track background tasks to prevent garbage collection
     self._background_tasks: set[asyncio.Task] = set()
+
+    self._tx_lock = asyncio.Lock()
+
+    logger.info("Initialized MeshProtocol node: %s", node_id)
 
   def set_message_callback(self, callback: Callable[[str, bytes], None]):
     """callback(sender_id_str, payload_bytes)"""
@@ -52,11 +59,15 @@ class MeshProtocol:
   ) -> bool:
     """Sends data to a specific destination over the mesh and waits for an ACK. Returns True if delivered."""
     dest_bytes = dest_id.encode("utf-8")[:8].ljust(8, b"\x00")
+    logger.info("Sending message to %s (%s)", dest_id, dest_bytes)
 
     for attempt in range(max_retries + 1):
+      logger.debug("Route discovery attempt %d to %s", attempt, dest_id)
       next_hop = await self._get_route(dest_bytes, timeout=timeout / 2)
       if not next_hop:
-        continue  # Retry route discovery
+        logger.warning(
+            "Could not find route to %s on attempt %d", dest_id, attempt)
+        continue
 
       seq = self.seq_num
       self.seq_num += 1
@@ -65,6 +76,12 @@ class MeshProtocol:
       msg_id = (dest_bytes, seq)
       self.pending_acks[msg_id] = ack_event
 
+      logger.debug(
+          "Transmitting DATA packet seq %d to %s via next hop %s",
+          seq,
+          dest_id,
+          next_hop,
+      )
       await self._transmit_raw_frame(
           FrameType.DATA,
           self.MAX_TTL,
@@ -79,18 +96,28 @@ class MeshProtocol:
       try:
         await asyncio.wait_for(ack_event.wait(), timeout)
         self.pending_acks.pop(msg_id, None)
+        logger.info(
+            "Successfully delivered message to %s (ack seq %d)", dest_id, seq)
         return True
       except asyncio.TimeoutError:
+        logger.warning(
+            "Timeout waiting for ACK for msg seq %d to %s. Clearing cached route.",
+            seq,
+            dest_id,
+        )
         # If ACK times out, the route might be broken. Delete it to force a new RREQ.
         self.routing_table.pop(dest_bytes, None)
         self.pending_acks.pop(msg_id, None)
 
+    logger.error(
+        "Failed to deliver message to %s after %d attempts", dest_id, max_retries)
     return False
 
   async def broadcast_message(self, data: bytes):
     """Sends data to all nodes."""
     seq = self.seq_num
     self.seq_num += 1
+    logger.info("Broadcasting message, seq %d", seq)
     await self._transmit_raw_frame(
         FrameType.DATA,
         self.MAX_TTL,
@@ -111,14 +138,29 @@ class MeshProtocol:
   async def _get_route(self, dest: bytes, timeout: float = 2.0) -> bytes | None:
     if dest in self.routing_table:
       if time.time() < self.routing_table[dest][2]:
+        logger.debug("Route cache hit for %s: next hop %s",
+                     dest, self.routing_table[dest][0])
         return self.routing_table[dest][0]
       else:
+        logger.debug("Expired route cache for %s", dest)
         del self.routing_table[dest]
 
-    if dest not in self.route_events:
-      self.route_events[dest] = asyncio.Event()
-    event = self.route_events[dest]
-    event.clear()
+    if dest in self._active_discoveries:
+      logger.debug(
+          "Route discovery already in progress for %s. Waiting...", dest)
+      event = self._active_discoveries[dest]
+      try:
+        await asyncio.wait_for(event.wait(), timeout)
+      except asyncio.TimeoutError:
+        pass
+      if dest in self.routing_table:
+        return self.routing_table[dest][0]
+      return None
+
+    # Start new route discovery
+    logger.debug("Starting route discovery for %s", dest)
+    event = asyncio.Event()
+    self._active_discoveries[dest] = event
 
     # Send RREQ
     seq = self.seq_num
@@ -138,7 +180,9 @@ class MeshProtocol:
     try:
       await asyncio.wait_for(event.wait(), timeout)
     except asyncio.TimeoutError:
-      pass
+      logger.debug("Route discovery timed out for %s", dest)
+    finally:
+      self._active_discoveries.pop(dest, None)
 
     if dest in self.routing_table:
       return self.routing_table[dest][0]
@@ -160,23 +204,37 @@ class MeshProtocol:
     )
     packed_frame = frame_obj.pack()
 
-    # CSMA/CA: Listen Before Talk
-    start_time = time.time()
-    attempts = 0
-    while time.time() - start_time < 3.0:
-      if not self.transceiver.is_busy():
-        await asyncio.sleep(random.uniform(0.001, 0.005))
+    async with self._tx_lock:
+      # CSMA/CA: Listen Before Talk
+      start_time = time.time()
+      attempts = 0
+      while time.time() - start_time < 3.0:
         if not self.transceiver.is_busy():
-          await self.transceiver.broadcast(packed_frame)
-          return
+          await asyncio.sleep(random.uniform(0.001, 0.005))
+          if not self.transceiver.is_busy():
+            logger.debug("Transmitting frame: type %d, seq %d",
+                         frame_type, seq)
+            await self.transceiver.broadcast(packed_frame)
+            return
 
-      wait_time = min(0.1, random.uniform(0.005, 0.01) * (2**attempts))
-      await asyncio.sleep(wait_time)
-      attempts += 1
+        wait_time = min(0.1, random.uniform(0.005, 0.01) * (2**attempts))
+        logger.debug("Channel busy. Backing off for %fs", wait_time)
+        await asyncio.sleep(wait_time)
+        attempts += 1
+
+  def _cleanup_seen_messages(self):
+    now = time.time()
+    expiry_cutoff = now - 300.0
+    self.seen_messages = {
+        msg_id: timestamp
+        for msg_id, timestamp in self.seen_messages.items()
+        if timestamp > expiry_cutoff
+    }
 
   async def _on_receive(self, data: bytes):
     frame = MeshFrame.unpack(data)
     if not frame:
+      logger.warning("Received invalid/mangled frame (unpack failed)")
       return
 
     # Ignore frames we originated (they bounced back through neighbors)
@@ -194,7 +252,9 @@ class MeshProtocol:
     # Deduplicate
     msg_id = (frame.orig_src, frame.seq, frame.frame_type)
     is_duplicate = msg_id in self.seen_messages
-    self.seen_messages.add(msg_id)
+    self.seen_messages[msg_id] = time.time()
+    if len(self.seen_messages) > 1000:
+      self._cleanup_seen_messages()
 
     # Opportunistically learn route from transmitter
     if frame.transmitter != self.node_id:
@@ -203,6 +263,15 @@ class MeshProtocol:
           1,
           time.time() + 300,
       )
+
+    logger.debug(
+        "Received frame type %d from %s (transmitter %s) to %s. Duplicate=%s",
+        frame.frame_type,
+        frame.orig_src,
+        frame.transmitter,
+        frame.final_dest,
+        is_duplicate,
+    )
 
     # Process frame
     if frame.frame_type == FrameType.RREQ:
@@ -238,6 +307,11 @@ class MeshProtocol:
       rrep_seq = self.seq_num
       self.seq_num += 1
       rrep_next_hop = self.routing_table[frame.orig_src][0]
+      logger.info(
+          "We are target of RREQ from %s. Sending RREP via next hop %s",
+          frame.orig_src,
+          rrep_next_hop,
+      )
       self._fire_and_forget(
           self._transmit_raw_frame(
               FrameType.RREP,
@@ -253,6 +327,8 @@ class MeshProtocol:
     else:
       # Rebroadcast RREQ
       if frame.ttl > 1:
+        logger.debug("Rebroadcasting RREQ for %s (ttl %d)",
+                     target_dest, frame.ttl - 1)
         self._fire_and_forget(
             self._transmit_raw_frame(
                 FrameType.RREQ,
@@ -283,13 +359,16 @@ class MeshProtocol:
       )
 
     if frame.final_dest == self.node_id:
-      if target_dest in self.route_events:
-        self.route_events[target_dest].set()
+      logger.info("Received RREP establishing route to %s", target_dest)
+      if target_dest in self._active_discoveries:
+        self._active_discoveries[target_dest].set()
     else:
       # Forward RREP
       if frame.ttl > 1:
         if frame.final_dest in self.routing_table:
           fwd_next_hop = self.routing_table[frame.final_dest][0]
+          logger.debug("Forwarding RREP for %s to %s",
+                       target_dest, fwd_next_hop)
           self._fire_and_forget(
               self._transmit_raw_frame(
                   FrameType.RREP,
@@ -311,6 +390,8 @@ class MeshProtocol:
         ack_seq = self.seq_num
         self.seq_num += 1
         ack_payload = struct.pack("!I", frame.seq)
+        logger.debug("Sending DATA ACK to %s via next hop %s",
+                     frame.orig_src, ack_next_hop)
         self._fire_and_forget(
             self._transmit_raw_frame(
                 FrameType.ACK,
@@ -323,11 +404,16 @@ class MeshProtocol:
                 ack_payload,
             )
         )
+      else:
+        logger.warning(
+            "Cannot send ACK back to %s: no route in table.", frame.orig_src
+        )
 
       if not is_duplicate:
         src_str = frame.orig_src.rstrip(b"\x00").decode(
             "utf-8", errors="ignore"
         )
+        logger.info("Received final DATA payload from %s", src_str)
         if self.on_message_callback:
           self.on_message_callback(src_str, frame.payload)
 
@@ -336,9 +422,12 @@ class MeshProtocol:
         src_str = frame.orig_src.rstrip(b"\x00").decode(
             "utf-8", errors="ignore"
         )
+        logger.info("Received broadcast DATA payload from %s", src_str)
         if self.on_message_callback:
           self.on_message_callback(src_str, frame.payload)
         if frame.ttl > 1:
+          logger.debug(
+              "Rebroadcasting broadcast DATA payload from %s", src_str)
           self._fire_and_forget(
               self._transmit_raw_frame(
                   FrameType.DATA,
@@ -358,6 +447,8 @@ class MeshProtocol:
       if frame.ttl > 1:
         if frame.final_dest in self.routing_table:
           fwd_next_hop = self.routing_table[frame.final_dest][0]
+          logger.debug("Forwarding DATA from %s to %s via %s",
+                       frame.orig_src, frame.final_dest, fwd_next_hop)
           self._fire_and_forget(
               self._transmit_raw_frame(
                   FrameType.DATA,
@@ -370,6 +461,9 @@ class MeshProtocol:
                   frame.payload,
               )
           )
+        else:
+          logger.warning(
+              "Dropped data packet: route to %s is missing", frame.final_dest)
 
   def _handle_ack(self, frame: MeshFrame, is_duplicate: bool):
     if is_duplicate:
@@ -378,6 +472,8 @@ class MeshProtocol:
       if len(frame.payload) == 4:
         acked_seq = struct.unpack("!I", frame.payload)[0]
         ack_id = (frame.orig_src, acked_seq)
+        logger.debug("Received ACK from %s for sequence %d",
+                     frame.orig_src, acked_seq)
         if ack_id in self.pending_acks:
           self.pending_acks[ack_id].set()
     else:
@@ -385,6 +481,8 @@ class MeshProtocol:
       if frame.ttl > 1:
         if frame.final_dest in self.routing_table:
           fwd_next_hop = self.routing_table[frame.final_dest][0]
+          logger.debug("Forwarding ACK for %s to next hop %s",
+                       frame.final_dest, fwd_next_hop)
           self._fire_and_forget(
               self._transmit_raw_frame(
                   FrameType.ACK,

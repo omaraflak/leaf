@@ -1,5 +1,5 @@
 import asyncio
-import struct
+import logging
 import threading
 import time
 from typing import Callable, Awaitable, Optional
@@ -10,6 +10,8 @@ try:
   import serial
 except ImportError:
   serial = None
+
+logger = logging.getLogger("leaf.serial")
 
 
 class SerialTransceiver(Transceiver):
@@ -81,39 +83,21 @@ class SerialTransceiver(Transceiver):
 
           # Stream parsing loop
           while True:
-            magic_idx = buffer.find(MeshFrame.MAGIC)
-            if magic_idx == -1:
-              buffer.clear()
-              break
-
-            if magic_idx > 0:
-              buffer = buffer[magic_idx:]
-
-            if len(buffer) < MeshFrame.HEADER_SIZE:
-              break
-
-            try:
-              header_data = struct.unpack(
-                  MeshFrame.HEADER_FMT, buffer[: MeshFrame.HEADER_SIZE]
-              )
-              payload_len = header_data[8]
-              total_frame_size = MeshFrame.HEADER_SIZE + payload_len + 4
-
-              if len(buffer) < total_frame_size:
-                break
-
-              frame_data = bytes(buffer[:total_frame_size])
-              buffer = buffer[total_frame_size:]
-
+            frame, consumed = MeshFrame.parse_from_buffer(buffer)
+            if frame:
+              frame_data = bytes(buffer[:consumed])
+              buffer = buffer[consumed:]
               if self.callback and self._loop:
                 asyncio.run_coroutine_threadsafe(
                     self.callback(frame_data), self._loop
                 )
-
-            except struct.error:
-              buffer = buffer[1:]
+            else:
+              if consumed > 0:
+                buffer = buffer[consumed:]
+              else:
+                break
         else:
           time.sleep(0.01)
       except Exception as e:
-        print(f"Serial read error: {e}")
+        logger.error("Serial read error: %s", e)
         time.sleep(1.0)
