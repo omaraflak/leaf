@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Callable
+from typing import Callable, Awaitable
 
 
 class Transceiver(ABC):
@@ -8,14 +8,14 @@ class Transceiver(ABC):
   """
 
   @abstractmethod
-  def broadcast(self, data: bytes) -> None:
+  async def broadcast(self, data: bytes) -> None:
     """Broadcasts a message."""
     pass
 
   @abstractmethod
-  def set_receive_callback(self, callback: Callable[[bytes], None]) -> None:
+  def set_receive_callback(self, callback: Callable[[bytes], Awaitable[None]]) -> None:
     """
-    Sets the callback function to be called when a message is received.
+    Sets the async callback function to be called when a message is received.
     The callback should take a single argument: the received bytes.
     """
     pass

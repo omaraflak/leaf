@@ -1,14 +1,14 @@
+import asyncio
+import struct
 import threading
 import time
-import struct
-from typing import Callable, Optional
+from typing import Callable, Awaitable, Optional
 from transceiver import Transceiver
 from frame import MeshFrame
 
 try:
   import serial
 except ImportError:
-  # Fallback if pyserial is not installed
   serial = None
 
 
@@ -16,6 +16,9 @@ class SerialTransceiver(Transceiver):
   """
   A Transceiver implementation that interfaces with a physical radio module
   via a serial COM port. Uses pyserial to read and write bytes.
+
+  The blocking serial reads run in a background thread and bridge into
+  the asyncio event loop via run_coroutine_threadsafe.
   """
 
   def __init__(self, port: str, baudrate: int = 9600):
@@ -27,21 +30,21 @@ class SerialTransceiver(Transceiver):
     self.port = port
     self.baudrate = baudrate
     self.serial = serial.Serial(port, baudrate, timeout=0.1)
-    self.callback: Optional[Callable[[bytes], None]] = None
+    self.callback: Optional[Callable[[bytes], Awaitable[None]]] = None
     self._running = True
+    self._loop: Optional[asyncio.AbstractEventLoop] = None
 
-    self.receive_thread = threading.Thread(
-        target=self._receive_loop, daemon=True)
-    self.receive_thread.start()
-
-  def broadcast(self, data: bytes) -> None:
-    """Writes raw frame data to the serial port."""
-    if self.serial.is_open:
-      self.serial.write(data)
-      self.serial.flush()
-
-  def set_receive_callback(self, callback: Callable[[bytes], None]) -> None:
+  def set_receive_callback(self, callback: Callable[[bytes], Awaitable[None]]) -> None:
     self.callback = callback
+    self._loop = asyncio.get_event_loop()
+    self._receive_thread = threading.Thread(
+        target=self._receive_loop, daemon=True)
+    self._receive_thread.start()
+
+  async def broadcast(self, data: bytes) -> None:
+    """Writes raw frame data to the serial port (offloaded to executor)."""
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, self._blocking_write, data)
 
   def is_busy(self) -> bool:
     """
@@ -52,10 +55,22 @@ class SerialTransceiver(Transceiver):
       return self.serial.in_waiting > 0
     return False
 
+  def close(self):
+    """Stops the read thread and closes the serial port."""
+    self._running = False
+    if self.serial.is_open:
+      self.serial.close()
+
+  def _blocking_write(self, data: bytes):
+    if self.serial.is_open:
+      self.serial.write(data)
+      self.serial.flush()
+
   def _receive_loop(self):
     """
-    Continuously reads from the serial port. Since serial is a stream of bytes,
-    this loops buffers the data and extracts complete MeshFrames based on MAGIC bytes.
+    Blocking read loop running in a background thread. Extracts complete
+    MeshFrames from the serial stream and dispatches them to the async
+    callback on the event loop.
     """
     buffer = bytearray()
     while self._running:
@@ -66,52 +81,39 @@ class SerialTransceiver(Transceiver):
 
           # Stream parsing loop
           while True:
-            # 1. Look for MAGIC bytes sync marker
             magic_idx = buffer.find(MeshFrame.MAGIC)
             if magic_idx == -1:
               buffer.clear()
               break
 
-            # 2. Discard any noise before MAGIC
             if magic_idx > 0:
               buffer = buffer[magic_idx:]
 
-            # 3. Wait until we have at least the full header
             if len(buffer) < MeshFrame.HEADER_SIZE:
               break
 
             try:
-              # 4. Unpack header to read the expected payload length
               header_data = struct.unpack(
                   MeshFrame.HEADER_FMT, buffer[: MeshFrame.HEADER_SIZE]
               )
               payload_len = header_data[8]
-              total_frame_size = (
-                  MeshFrame.HEADER_SIZE + payload_len + 4
-              )  # 4 for CRC32
+              total_frame_size = MeshFrame.HEADER_SIZE + payload_len + 4
 
-              # 5. Wait until the entire frame has arrived
               if len(buffer) < total_frame_size:
                 break
 
-              # 6. Extract the complete frame and advance the buffer
               frame_data = bytes(buffer[:total_frame_size])
               buffer = buffer[total_frame_size:]
 
-              if self.callback:
-                self.callback(frame_data)
+              if self.callback and self._loop:
+                asyncio.run_coroutine_threadsafe(
+                    self.callback(frame_data), self._loop
+                )
 
             except struct.error:
-              # Malformed header, pop 1 byte to keep searching for a valid MAGIC
               buffer = buffer[1:]
         else:
           time.sleep(0.01)
       except Exception as e:
         print(f"Serial read error: {e}")
         time.sleep(1.0)
-
-  def close(self):
-    """Stops the read thread and closes the serial port."""
-    self._running = False
-    if self.serial.is_open:
-      self.serial.close()
