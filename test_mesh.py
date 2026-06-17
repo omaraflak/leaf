@@ -140,39 +140,40 @@ class TestMeshNetwork(unittest.TestCase):
     # Use TTL=1 to prevent B from rebroadcasting (which would cause
     # secondary collisions unrelated to CSMA/CA).
     self.medium.bytes_per_sec = 100
-    
+
     proto_a, rec_a = self._create_node(0, 0, "Node_A")
     proto_b, rec_b = self._create_node(1000, 0, "Node_B")
     proto_c, rec_c = self._create_node(2000, 0, "Node_C")
-    
+
     from frame import FrameType
-    
+
     def send_ttl1(proto, payload):
-        """Send a single-hop broadcast (TTL=1, no rebroadcast)."""
-        with proto.lock:
-            seq = proto.seq_num
-            proto.seq_num += 1
-        proto._transmit_raw_frame(
-            FrameType.DATA, 1, seq, proto.node_id,
-            proto.BROADCAST_MAC, proto.node_id,
-            proto.BROADCAST_MAC, payload,
-        )
-    
+      """Send a single-hop broadcast (TTL=1, no rebroadcast)."""
+      with proto.lock:
+        seq = proto.seq_num
+        proto.seq_num += 1
+      proto._transmit_raw_frame(
+          FrameType.DATA, 1, seq, proto.node_id,
+          proto.BROADCAST_MAC, proto.node_id,
+          proto.BROADCAST_MAC, payload,
+      )
+
     # A starts first, C starts 50ms later (enough time to detect A's signal)
     t1 = threading.Thread(target=send_ttl1, args=(proto_a, b"A message"))
     t1.start()
     time.sleep(0.05)
     t2 = threading.Thread(target=send_ttl1, args=(proto_c, b"C message"))
     t2.start()
-    
+
     t1.join()
     t2.join()
-    
+
     # Wait for slow transmissions and CSMA backoffs to finish
     time.sleep(3.0)
-    
+
     # B should receive BOTH messages cleanly because CSMA/CA staggered them
-    self.assertEqual(len(rec_b), 2, "CSMA/CA should have prevented the collision, allowing B to receive both.")
+    self.assertEqual(len(
+        rec_b), 2, "CSMA/CA should have prevented the collision, allowing B to receive both.")
 
     # rec_b should contain one message from A and one from C
     senders = {msg[0] for msg in rec_b}

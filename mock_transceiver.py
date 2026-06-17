@@ -24,7 +24,7 @@ class MockMedium:
   def _distance(self, t1: "MockTransceiver", t2: "MockTransceiver") -> float:
     return ((t1.x - t2.x) ** 2 + (t1.y - t2.y) ** 2) ** 0.5
 
-  def transmit(self, sender: "MockTransceiver", channel: int, data: bytes):
+  def transmit(self, sender: "MockTransceiver", data: bytes):
     """Simulates transmission of data. Calculates duration based on mock baud rate."""
     duration = len(data) / self.bytes_per_sec
 
@@ -37,13 +37,13 @@ class MockMedium:
 
     # Notify receivers that a signal is starting
     for r in receivers_in_range:
-      r._air_signal_start(channel, data)
+      r._air_signal_start(data)
 
     def finish():
       time.sleep(duration)
       # Notify receivers that the signal has ended
       for r in receivers_in_range:
-        r._air_signal_end(channel, data)
+        r._air_signal_end(data)
 
     threading.Thread(target=finish, daemon=True).start()
 
@@ -58,7 +58,6 @@ class MockTransceiver(Transceiver):
     self.x = x
     self.y = y
     self.name = name
-    self.channel = 0
     self.callback = None
     self.lock = threading.Lock()
 
@@ -67,13 +66,8 @@ class MockTransceiver(Transceiver):
 
     self.medium.register(self)
 
-  def set_channel(self, channel: int) -> None:
-    with self.lock:
-      self.channel = channel
-      self.active_signals.clear()  # Drop signals when channel changes
-
   def broadcast(self, data: bytes) -> None:
-    self.medium.transmit(self, self.channel, data)
+    self.medium.transmit(self, data)
 
   def set_receive_callback(self, callback: Callable[[bytes], None]) -> None:
     self.callback = callback
@@ -83,46 +77,44 @@ class MockTransceiver(Transceiver):
     with self.lock:
       return len(self.active_signals) > 0
 
-  def _air_signal_start(self, channel: int, data: bytes):
+  def _air_signal_start(self, data: bytes):
     """Called by MockMedium when a signal reaches this transceiver's antenna."""
     with self.lock:
-      if self.channel == channel:
-        sig_id = id(data)
-        self.active_signals[sig_id] = {"data": data, "collided": False}
-        # If there are multiple active signals, they interfere and all collide
-        if len(self.active_signals) > 1:
-          for sig in self.active_signals.values():
-            sig["collided"] = True
+      sig_id = id(data)
+      self.active_signals[sig_id] = {"data": data, "collided": False}
+      # If there are multiple active signals, they interfere and all collide
+      if len(self.active_signals) > 1:
+        for sig in self.active_signals.values():
+          sig["collided"] = True
 
-  def _air_signal_end(self, channel: int, data: bytes):
+  def _air_signal_end(self, data: bytes):
     """Called by MockMedium when a signal finishes transmitting."""
     with self.lock:
-      if self.channel == channel:
-        sig_id = id(data)
-        if sig_id in self.active_signals:
-          sig_info = self.active_signals.pop(sig_id)
-          if not sig_info["collided"]:
-            # Successfully received cleanly without overlap
-            if self.callback:
-              def delayed_callback(d):
-                time.sleep(0.005)  # Simulated processing delay
-                self.callback(d)
-              threading.Thread(
-                  target=delayed_callback,
-                  args=(sig_info["data"],),
-                  daemon=True,
-              ).start()
-          else:
-            # Signal was mangled by a collision. Pass garbage to simulate noise.
-            garbage = bytearray(len(data))
-            for i in range(len(garbage)):
-              garbage[i] = random.randint(0, 255)
-            if self.callback:
-              def delayed_callback_garbage(d):
-                time.sleep(0.005)
-                self.callback(d)
-              threading.Thread(
-                  target=delayed_callback_garbage,
-                  args=(bytes(garbage),),
-                  daemon=True,
-              ).start()
+      sig_id = id(data)
+      if sig_id in self.active_signals:
+        sig_info = self.active_signals.pop(sig_id)
+        if not sig_info["collided"]:
+          # Successfully received cleanly without overlap
+          if self.callback:
+            def delayed_callback(d):
+              time.sleep(0.005)  # Simulated processing delay
+              self.callback(d)
+            threading.Thread(
+                target=delayed_callback,
+                args=(sig_info["data"],),
+                daemon=True,
+            ).start()
+        else:
+          # Signal was mangled by a collision. Pass garbage to simulate noise.
+          garbage = bytearray(len(data))
+          for i in range(len(garbage)):
+            garbage[i] = random.randint(0, 255)
+          if self.callback:
+            def delayed_callback_garbage(d):
+              time.sleep(0.005)
+              self.callback(d)
+            threading.Thread(
+                target=delayed_callback_garbage,
+                args=(bytes(garbage),),
+                daemon=True,
+            ).start()

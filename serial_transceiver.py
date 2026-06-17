@@ -28,17 +28,11 @@ class SerialTransceiver(Transceiver):
     self.baudrate = baudrate
     self.serial = serial.Serial(port, baudrate, timeout=0.1)
     self.callback: Optional[Callable[[bytes], None]] = None
-    self.channel = 0
     self._running = True
 
     self.receive_thread = threading.Thread(
         target=self._receive_loop, daemon=True)
     self.receive_thread.start()
-
-  def set_channel(self, channel: int) -> None:
-    self.channel = channel
-    # Note: Hardware-specific AT commands might be required here to actually change the radio channel.
-    # Example: self.serial.write(f"AT+CHAN={channel}\r\n".encode())
 
   def broadcast(self, data: bytes) -> None:
     """Writes raw frame data to the serial port."""

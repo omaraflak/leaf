@@ -8,13 +8,8 @@ class Transceiver(ABC):
   """
 
   @abstractmethod
-  def set_channel(self, channel: int) -> None:
-    """Sets the radio to a specific channel."""
-    pass
-
-  @abstractmethod
   def broadcast(self, data: bytes) -> None:
-    """Broadcasts a message on the current channel."""
+    """Broadcasts a message."""
     pass
 
   @abstractmethod
@@ -27,5 +22,5 @@ class Transceiver(ABC):
 
   @abstractmethod
   def is_busy(self) -> bool:
-    """Returns True if the transceiver detects radio activity on the current channel."""
+    """Returns True if the transceiver detects radio activity."""
     pass

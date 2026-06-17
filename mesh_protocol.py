@@ -15,13 +15,12 @@ class MeshProtocol:
   MAGIC = b"\xaa\xbb"
   BROADCAST_MAC = b"\xff" * 8
 
-  def __init__(self, transceiver: Transceiver, node_id: str, channel: int = 0):
+  def __init__(self, transceiver: Transceiver, node_id: str):
     self.transceiver = transceiver
     self.node_id_str = node_id
     # Pad or truncate node_id to 8 bytes
     self.node_id = node_id.encode("utf-8")[:8].ljust(8, b"\x00")
 
-    self.transceiver.set_channel(channel)
     self.transceiver.set_receive_callback(self._on_receive)
 
     self.seq_num = 0
