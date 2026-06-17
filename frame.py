@@ -3,11 +3,10 @@ import binascii
 
 
 class FrameType:
-  DISCOVERY = 1
-  DATA = 2
-  ACK = 3
-  RREQ = 4
-  RREP = 5
+  DATA = 1
+  ACK = 2
+  RREQ = 3
+  RREP = 4
 
 
 class MeshFrame:

@@ -12,12 +12,12 @@ class MeshProtocol:
   Implements AODV-like routing, CSMA/CA, and End-to-End ACKs.
   """
 
-  MAGIC = b"\xaa\xbb"
   BROADCAST_MAC = b"\xff" * 8
+  MAX_TTL = 10
 
   def __init__(self, transceiver: Transceiver, node_id: str):
     self.transceiver = transceiver
-    self.node_id_str = node_id
+
     # Pad or truncate node_id to 8 bytes
     self.node_id = node_id.encode("utf-8")[:8].ljust(8, b"\x00")
 
@@ -44,28 +44,6 @@ class MeshProtocol:
     """callback(sender_id_str, payload_bytes)"""
     self.on_message_callback = callback
 
-  def start_discovery(self, interval_seconds: float = 5.0):
-    """Starts broadcasting discovery beacons periodically."""
-
-    def discover_loop():
-      while True:
-        with self.lock:
-          seq = self.seq_num
-          self.seq_num += 1
-        self._transmit_raw_frame(
-            FrameType.DISCOVERY,
-            1,
-            seq,
-            self.node_id,
-            self.BROADCAST_MAC,
-            self.node_id,
-            self.BROADCAST_MAC,
-            b"",
-        )
-        time.sleep(interval_seconds)
-
-    threading.Thread(target=discover_loop, daemon=True).start()
-
   def _get_route(self, dest: bytes, timeout: float = 2.0) -> bytes:
     with self.lock:
       if dest in self.routing_table:
@@ -87,7 +65,7 @@ class MeshProtocol:
 
     self._transmit_raw_frame(
         FrameType.RREQ,
-        10,
+        self.MAX_TTL,
         seq,
         self.node_id,
         self.BROADCAST_MAC,
@@ -124,7 +102,7 @@ class MeshProtocol:
 
       self._transmit_raw_frame(
           FrameType.DATA,
-          10,
+          self.MAX_TTL,
           seq,
           self.node_id,
           dest_bytes,
@@ -153,7 +131,7 @@ class MeshProtocol:
       self.seq_num += 1
     self._transmit_raw_frame(
         FrameType.DATA,
-        10,
+        self.MAX_TTL,
         seq,
         self.node_id,
         self.BROADCAST_MAC,
@@ -231,7 +209,7 @@ class MeshProtocol:
       if is_duplicate:
         return
       target_dest = frame.payload
-      hops = 10 - frame.ttl + 1
+      hops = self.MAX_TTL - frame.ttl + 1
 
       with self.lock:
         if (
@@ -252,7 +230,7 @@ class MeshProtocol:
           rrep_next_hop = self.routing_table[frame.orig_src][0]
         self._transmit_raw_frame(
             FrameType.RREP,
-            10,
+            self.MAX_TTL,
             rrep_seq,
             self.node_id,
             frame.orig_src,
@@ -278,7 +256,7 @@ class MeshProtocol:
       if is_duplicate:
         return
       target_dest = frame.payload
-      hops = 10 - frame.ttl + 1
+      hops = self.MAX_TTL - frame.ttl + 1
 
       with self.lock:
         if (
@@ -325,7 +303,7 @@ class MeshProtocol:
           ack_payload = struct.pack("!I", frame.seq)
           self._transmit_raw_frame(
               FrameType.ACK,
-              10,
+              self.MAX_TTL,
               ack_seq,
               self.node_id,
               frame.orig_src,
