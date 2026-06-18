@@ -2,12 +2,13 @@ import asyncio
 import logging
 import time
 import unittest
-from frame import FrameType
+from frame import FrameType, MeshFrame
 from mock_transceiver import MockMedium, MockTransceiver
 from mesh_protocol import MeshProtocol
 
 
 class TestMeshNetwork(unittest.IsolatedAsyncioTestCase):
+
   def setUp(self):
     # Suppress noisy log output from expected failures (e.g. test_out_of_range)
     logging.disable(logging.CRITICAL)
@@ -90,7 +91,8 @@ class TestMeshNetwork(unittest.IsolatedAsyncioTestCase):
     self.assertTrue(success2)
     # Should not need to wait for RREQ/RREP
     self.assertTrue(
-        duration < 1.0, f"Cached route should be fast, took {duration}s")
+        duration < 1.0, f"Cached route should be fast, took {duration}s"
+    )
 
     self.assertEqual(len(rec_c), 2)
 
@@ -162,9 +164,9 @@ class TestMeshNetwork(unittest.IsolatedAsyncioTestCase):
           1,
           seq,
           proto.node_id,
-          proto.BROADCAST_MAC,
+          MeshFrame.BROADCAST_MAC,
           proto.node_id,
-          proto.BROADCAST_MAC,
+          MeshFrame.BROADCAST_MAC,
           payload,
       )
 
@@ -200,7 +202,6 @@ class TestMeshNetwork(unittest.IsolatedAsyncioTestCase):
 
     async def intercept_transmit(sender, data):
       nonlocal rreq_count
-      from frame import MeshFrame
       frame = MeshFrame.unpack(data)
       if frame and frame.frame_type == FrameType.RREQ and sender.name == "Node_A":
         rreq_count += 1
@@ -217,7 +218,7 @@ class TestMeshNetwork(unittest.IsolatedAsyncioTestCase):
         proto_a.send_message("Node_C", b"Msg 1", timeout=5.0),
         proto_a.send_message("Node_C", b"Msg 2", timeout=5.0),
         proto_a.send_message("Node_C", b"Msg 3", timeout=5.0),
-        return_exceptions=True
+        return_exceptions=True,
     )
 
     # Check they were all successfully delivered
@@ -227,7 +228,8 @@ class TestMeshNetwork(unittest.IsolatedAsyncioTestCase):
     # Without coalescing, A would transmit 3 RREQs (one for each message).
     # With coalescing, A should only transmit 1 RREQ.
     self.assertEqual(
-        rreq_count, 1, f"Expected exactly 1 RREQ broadcast, got {rreq_count}")
+        rreq_count, 1, f"Expected exactly 1 RREQ broadcast, got {rreq_count}"
+    )
 
   async def test_adaptive_route_expiry(self):
     # Stationary -> stationary: long expiry
@@ -237,10 +239,11 @@ class TestMeshNetwork(unittest.IsolatedAsyncioTestCase):
     success = await proto_a.send_message("Node_B", b"hi", timeout=2.0)
     self.assertTrue(success)
 
-    dest_bytes = "Node_B".encode('utf-8')[:8].ljust(8, b'\x00')
+    dest_bytes = "Node_B".encode("utf-8")[:8].ljust(8, b"\x00")
     expiry = proto_a.routing_table[dest_bytes][2]
     self.assertAlmostEqual(
-        expiry, time.time() + MeshProtocol.ROUTE_EXPIRY_STATIONARY, delta=5.0)
+        expiry, time.time() + MeshProtocol.ROUTE_EXPIRY_STATIONARY, delta=5.0
+    )
 
     # Stationary -> mobile: short expiry
     proto_c, _ = self._create_node(0, 0, "Node_C")
@@ -249,10 +252,11 @@ class TestMeshNetwork(unittest.IsolatedAsyncioTestCase):
     success = await proto_c.send_message("Node_D", b"hi", timeout=2.0)
     self.assertTrue(success)
 
-    dest_bytes = "Node_D".encode('utf-8')[:8].ljust(8, b'\x00')
+    dest_bytes = "Node_D".encode("utf-8")[:8].ljust(8, b"\x00")
     expiry = proto_c.routing_table[dest_bytes][2]
     self.assertAlmostEqual(
-        expiry, time.time() + MeshProtocol.ROUTE_EXPIRY_MOBILE, delta=5.0)
+        expiry, time.time() + MeshProtocol.ROUTE_EXPIRY_MOBILE, delta=5.0
+    )
 
   async def test_route_preference_stationary_over_mobile(self):
     proto_a, _ = self._create_node(0, 0, "Node_A")

@@ -17,11 +17,12 @@ class FrameFlags:
 
 class MeshFrame:
   """
-  Utility class to encapsulate building, parsing, and verifying
-  radio packets for the AODV mesh protocol.
-  """
+Utility class to encapsulate building, parsing, and verifying
+radio packets for the AODV mesh protocol.
+"""
 
   MAGIC = b"\xaa\xbb"
+  BROADCAST_MAC = b"\xff\xff\xff\xff\xff\xff\xff\xff"
   # Format: MAGIC (2), Type (1), TTL (1), Seq (4), OrigSrc (8), FinalDest (8),
   #         Transmitter (8), NextHop (8), Flags (1), PayloadLen (2)
   HEADER_FMT = "!2s B B I 8s 8s 8s 8s B H"
@@ -117,13 +118,13 @@ class MeshFrame:
   @classmethod
   def parse_from_buffer(cls, buffer: bytearray) -> tuple[Optional["MeshFrame"], int]:
     """
-    Parses a MeshFrame from a streaming bytearray buffer.
-    Returns:
-      (frame, bytes_consumed):
-        - If a frame is successfully parsed, frame is MeshFrame, bytes_consumed is total_frame_size.
-        - If a frame is incomplete, frame is None, bytes_consumed is 0.
-        - If the buffer starts with invalid bytes (no magic), frame is None, bytes_consumed is number of skipped bytes.
-    """
+Parses a MeshFrame from a streaming bytearray buffer.
+Returns:
+  (frame, bytes_consumed):
+    - If a frame is successfully parsed, frame is MeshFrame, bytes_consumed is total_frame_size.
+    - If a frame is incomplete, frame is None, bytes_consumed is 0.
+    - If the buffer starts with invalid bytes (no magic), frame is None, bytes_consumed is number of skipped bytes.
+"""
     if not buffer:
       return None, 0
 

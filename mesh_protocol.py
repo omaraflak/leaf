@@ -17,7 +17,6 @@ Implements AODV-like routing, CSMA/CA, End-to-End ACKs, and
 mobility-aware route management.
 """
 
-  BROADCAST_MAC = b"\xff" * 8
   MAX_TTL = 10
 
   # Route expiry durations
@@ -139,9 +138,9 @@ mobility-aware route management.
         self.MAX_TTL,
         seq,
         self.node_id,
-        self.BROADCAST_MAC,
+        MeshFrame.BROADCAST_MAC,
         self.node_id,
-        self.BROADCAST_MAC,
+        MeshFrame.BROADCAST_MAC,
         data,
     )
 
@@ -190,9 +189,9 @@ mobility-aware route management.
         self.MAX_TTL,
         seq,
         self.node_id,
-        self.BROADCAST_MAC,
+        MeshFrame.BROADCAST_MAC,
         self.node_id,
-        self.BROADCAST_MAC,
+        MeshFrame.BROADCAST_MAC,
         dest,
     )
 
@@ -271,8 +270,8 @@ mobility-aware route management.
       self, new_hops: int, new_mobile: bool, old_hops: int, old_mobile: bool
   ) -> bool:
     """Determines if a new route is better than an existing one.
-    Prefers stationary next-hops over mobile ones, tolerating up to
-    MOBILITY_HOP_PENALTY extra hops for stability."""
+Prefers stationary next-hops over mobile ones, tolerating up to
+MOBILITY_HOP_PENALTY extra hops for stability."""
     if new_mobile == old_mobile:
       # Same mobility class: prefer fewer hops
       return new_hops < old_hops
@@ -310,7 +309,7 @@ mobility-aware route management.
       return
 
     # AODV Rule: Ignore unicast frames not meant for us (unless broadcast)
-    if frame.next_hop != self.node_id and frame.next_hop != self.BROADCAST_MAC:
+    if frame.next_hop != self.node_id and frame.next_hop != MeshFrame.BROADCAST_MAC:
       return
 
     # Deduplicate
@@ -395,7 +394,7 @@ mobility-aware route management.
                 frame.orig_src,
                 frame.final_dest,
                 self.node_id,
-                self.BROADCAST_MAC,
+                MeshFrame.BROADCAST_MAC,
                 frame.payload,
             )
         )
@@ -471,7 +470,7 @@ mobility-aware route management.
         if self.on_message_callback:
           self.on_message_callback(src_str, frame.payload)
 
-    elif frame.final_dest == self.BROADCAST_MAC:
+    elif frame.final_dest == MeshFrame.BROADCAST_MAC:
       if not is_duplicate:
         src_str = frame.orig_src.rstrip(b"\x00").decode(
             "utf-8", errors="ignore"
@@ -491,7 +490,7 @@ mobility-aware route management.
                   frame.orig_src,
                   frame.final_dest,
                   self.node_id,
-                  self.BROADCAST_MAC,
+                  MeshFrame.BROADCAST_MAC,
                   frame.payload,
               )
           )
