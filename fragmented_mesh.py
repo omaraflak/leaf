@@ -27,7 +27,7 @@ class FragmentedMeshProtocol:
 
     self.on_message_callback: Callable[[str, bytes], None] | None = None
 
-    # Message ID counter for outgoing messages (2 bytes, wraps at 65536)
+    # Message ID counter for outgoing messages (1 byte, wraps at 256)
     self._next_msg_id = 0
 
     # (sender_id, msg_id) -> {"chunks": {chunk_idx: data}, "total": total, "last_update": timestamp}
@@ -48,7 +48,7 @@ class FragmentedMeshProtocol:
   ) -> bool:
     """Sends arbitrarily large data to a destination by fragmenting it."""
     msg_id = self._next_msg_id
-    self._next_msg_id = (self._next_msg_id + 1) % 65536
+    self._next_msg_id = (self._next_msg_id + 1) % 256
 
     # Calculate chunks
     total_chunks = (len(data) + self.FRAGMENT_SIZE - 1) // self.FRAGMENT_SIZE
@@ -60,8 +60,8 @@ class FragmentedMeshProtocol:
       end = start + self.FRAGMENT_SIZE
       chunk_data = data[start:end]
 
-      # Pack 10-byte header: msg_id (2), chunk_idx (4), total_chunks (4)
-      header = struct.pack("!H I I", msg_id, chunk_idx, total_chunks)
+      # Pack 9-byte header: msg_id (1), chunk_idx (4), total_chunks (4)
+      header = struct.pack("!B I I", msg_id, chunk_idx, total_chunks)
       chunk_payload = header + chunk_data
 
       # Send chunk. Since it is unicast, MeshProtocol guarantees delivery per chunk (with ACKs).
@@ -83,7 +83,7 @@ class FragmentedMeshProtocol:
   async def broadcast_message(self, data: bytes):
     """Broadcasts arbitrarily large data by fragmenting it."""
     msg_id = self._next_msg_id
-    self._next_msg_id = (self._next_msg_id + 1) % 65536
+    self._next_msg_id = (self._next_msg_id + 1) % 256
 
     total_chunks = (len(data) + self.FRAGMENT_SIZE - 1) // self.FRAGMENT_SIZE
     if total_chunks == 0:
@@ -94,7 +94,7 @@ class FragmentedMeshProtocol:
       end = start + self.FRAGMENT_SIZE
       chunk_data = data[start:end]
 
-      header = struct.pack("!H I I", msg_id, chunk_idx, total_chunks)
+      header = struct.pack("!B I I", msg_id, chunk_idx, total_chunks)
       chunk_payload = header + chunk_data
 
       # Broadcast chunk (no end-to-end ACKs)
@@ -112,14 +112,14 @@ class FragmentedMeshProtocol:
     task.add_done_callback(self._background_tasks.discard)
 
   def _on_mesh_message(self, sender_id: str, payload: bytes):
-    if len(payload) < 10:
+    if len(payload) < 9:
       logger.warning(
           "Received invalid fragment from %s: payload too short", sender_id
       )
       return
 
-    msg_id, chunk_idx, total_chunks = struct.unpack("!H I I", payload[:10])
-    chunk_data = payload[10:]
+    msg_id, chunk_idx, total_chunks = struct.unpack("!B I I", payload[:9])
+    chunk_data = payload[9:]
 
     key = (sender_id, msg_id)
     now = time.time()
