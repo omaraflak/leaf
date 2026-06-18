@@ -18,11 +18,11 @@ mobility-aware route management.
 """
 
   MAX_TTL = 10
-  ROUTE_EXPIRY_STATIONARY = 1800.0
-  ROUTE_EXPIRY_MOBILE = 60.0
-  ROUTE_CLEANUP_INTERVAL = 10.0
+  ROUTE_EXPIRY_STATIONARY_SEC = 1800.0
+  ROUTE_EXPIRY_MOBILE_SEC = 60.0
+  ROUTE_CLEANUP_INTERVAL_SEC = 10.0
   MOBILITY_HOP_PENALTY = 2
-  BROADCAST_JITTER = 0.05
+  BROADCAST_JITTER_SEC = 0.05
 
   def __init__(self, transceiver: Transceiver, node_id: str, mobile: bool = False):
     self.transceiver = transceiver
@@ -237,7 +237,7 @@ mobility-aware route management.
     packed_frame = frame_obj.pack()
 
     if next_hop == MeshFrame.BROADCAST_MAC:
-      await asyncio.sleep(random.uniform(0.0, self.BROADCAST_JITTER))
+      await asyncio.sleep(random.uniform(0.0, self.BROADCAST_JITTER_SEC))
 
     async with self._tx_lock:
 
@@ -264,9 +264,9 @@ mobility-aware route management.
   ):
     """Updates the routing table if the new route is better."""
     route_expiry = (
-        self.ROUTE_EXPIRY_MOBILE
+        self.ROUTE_EXPIRY_MOBILE_SEC
         if next_hop_mobile
-        else self.ROUTE_EXPIRY_STATIONARY
+        else self.ROUTE_EXPIRY_STATIONARY_SEC
     )
     expiry = time.time() + route_expiry
     if dest not in self.routing_table:
@@ -572,7 +572,7 @@ MOBILITY_HOP_PENALTY extra hops for stability."""
   async def _cleanup_routing_table_loop(self):
     try:
       while True:
-        await asyncio.sleep(self.ROUTE_CLEANUP_INTERVAL)
+        await asyncio.sleep(self.ROUTE_CLEANUP_INTERVAL_SEC)
         self._cleanup_routing_table()
     except asyncio.CancelledError:
       logger.debug("Routing table cleanup task cancelled")
