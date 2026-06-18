@@ -60,39 +60,6 @@ def _unpack_response(data: bytes) -> tuple[int, bool, bytes]:
   return request_id, success, payload_or_error
 
 
-def _enable_callback_chaining(mesh: FragmentedMesh):
-  """Enables multiple callbacks to coexist on a FragmentedMesh instance."""
-  if hasattr(mesh, "_callback_chain_enabled"):
-    return
-
-  mesh._callback_chain_enabled = True  # type: ignore
-  mesh._rpc_handlers = []  # type: ignore
-  mesh._user_callback = mesh.on_message_callback  # type: ignore
-
-  def chained_callback(sender_id: str, payload: bytes):
-    handled = False
-    # Call RPC handlers
-    for handler in list(mesh._rpc_handlers):  # type: ignore
-      try:
-        if handler(sender_id, payload):
-          handled = True
-      except Exception:
-        logger.exception("Error in chained RPC handler")
-
-    # Call user callback fallback only if not handled by any RPC handler
-    if not handled and mesh._user_callback:  # type: ignore
-      try:
-        mesh._user_callback(sender_id, payload)  # type: ignore
-      except Exception:
-        logger.exception("Error in user callback fallback")
-
-  # Monkey-patch set_message_callback to update _user_callback instead
-  mesh.set_message_callback = lambda callback: setattr(
-      mesh, "_user_callback", callback
-  )
-  mesh.on_message_callback = chained_callback
-
-
 class Message(abc.ABC):
   """Abstract interface for all RPC requests and responses."""
 
@@ -117,9 +84,14 @@ class MeshRpcServer:
     self._request_classes: dict[str, type[Message]] = {}
     self._terminated = asyncio.Event()
     self._register_methods()
+    self.mesh.add_message_listener(self._on_mesh_message)
 
-    _enable_callback_chaining(self.mesh)
-    self.mesh._rpc_handlers.append(self._on_mesh_message)  # type: ignore
+  async def wait_for_termination(self):
+    await self._terminated.wait()
+
+  def close(self):
+    self._terminated.set()
+    self.mesh.remove_message_listener(self._on_mesh_message)
 
   def _register_methods(self):
     for name, attr in inspect.getmembers(self, predicate=inspect.ismethod):
@@ -145,22 +117,9 @@ class MeshRpcServer:
             "Registered RPC method: %s (%s)", name, request_class.__name__
         )
 
-  async def wait_for_termination(self):
-    await self._terminated.wait()
-
-  def close(self):
-    self._terminated.set()
-    if (
-        hasattr(self.mesh, "_rpc_handlers")
-        and self._on_mesh_message in self.mesh._rpc_handlers  # type: ignore
-    ):
-      self.mesh._rpc_handlers.remove(self._on_mesh_message)  # type: ignore
-
-  def _on_mesh_message(self, sender_id: str, payload: bytes) -> bool:
+  def _on_mesh_message(self, sender_id: str, payload: bytes):
     if len(payload) >= 7 and payload[0] == _MSG_TYPE_REQUEST:
       asyncio.create_task(self._handle_request(sender_id, payload))
-      return True
-    return False
 
   async def _handle_request(self, sender_id: str, payload: bytes):
     request_id = 0
@@ -211,9 +170,7 @@ class MeshRpcClient:
     self.server_node_id = server_node_id
     self._next_request_id = 0
     self._pending_requests: dict[int, asyncio.Future] = {}
-
-    _enable_callback_chaining(self.mesh)
-    self.mesh._rpc_handlers.append(self._on_mesh_message)  # type: ignore
+    self.mesh.add_message_listener(self._on_mesh_message)
 
   async def call(
       self,
@@ -254,14 +211,9 @@ class MeshRpcClient:
       if not fut.done():
         fut.cancel()
     self._pending_requests.clear()
+    self.mesh.remove_message_listener(self._on_mesh_message)
 
-    if (
-        hasattr(self.mesh, "_rpc_handlers")
-        and self._on_mesh_message in self.mesh._rpc_handlers  # type: ignore
-    ):
-      self.mesh._rpc_handlers.remove(self._on_mesh_message)  # type: ignore
-
-  def _on_mesh_message(self, sender_id: str, payload: bytes) -> bool:
+  def _on_mesh_message(self, sender_id: str, payload: bytes):
     if len(payload) >= 6 and payload[0] == _MSG_TYPE_RESPONSE:
       try:
         request_id, success, payload_or_error = _unpack_response(payload)
@@ -270,5 +222,3 @@ class MeshRpcClient:
           future.set_result((success, payload_or_error))
       except Exception as e:
         logger.error("Error unpacking RPC response: %s", e)
-      return True
-    return False

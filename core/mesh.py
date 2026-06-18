@@ -47,7 +47,7 @@ class Mesh:
     # dest -> event (active route discoveries)
     self._active_discoveries: dict[bytes, asyncio.Event] = {}
 
-    self.on_message_callback: Callable[[str, bytes], None] | None = None
+    self._message_listeners: list[Callable[[str, bytes], None]] = []
 
     # Track background tasks to prevent garbage collection
     self._background_tasks: set[asyncio.Task] = set()
@@ -60,9 +60,13 @@ class Mesh:
     # Start periodic cleanup of routing table
     self._fire_and_forget(self._cleanup_routing_table_loop())
 
-  def set_message_callback(self, callback: Callable[[str, bytes], None]):
-    """callback(sender_id_str, payload_bytes)"""
-    self.on_message_callback = callback
+  def add_message_listener(self, callback: Callable[[str, bytes], None]):
+    """Adds a message listener. Multiple listeners can coexist."""
+    self._message_listeners.append(callback)
+
+  def remove_message_listener(self, callback: Callable[[str, bytes], None]):
+    """Removes a previously added message listener."""
+    self._message_listeners.remove(callback)
 
   async def send_message(
       self, dest_id: str, data: bytes, timeout: float = 5.0, max_retries: int = 3
@@ -500,8 +504,8 @@ class Mesh:
             "utf-8", errors="ignore"
         )
         logger.info("Received final DATA payload from %s", src_str)
-        if self.on_message_callback:
-          self.on_message_callback(src_str, frame.payload)
+        for listener in list(self._message_listeners):
+          listener(src_str, frame.payload)
 
     elif frame.final_dest == MeshFrame.BROADCAST_MAC:
       if not is_duplicate:
@@ -509,8 +513,8 @@ class Mesh:
             "utf-8", errors="ignore"
         )
         logger.info("Received broadcast DATA payload from %s", src_str)
-        if self.on_message_callback:
-          self.on_message_callback(src_str, frame.payload)
+        for listener in list(self._message_listeners):
+          listener(src_str, frame.payload)
         if frame.ttl > 1:
           logger.debug(
               "Rebroadcasting broadcast DATA payload from %s", src_str

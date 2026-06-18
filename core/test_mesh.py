@@ -27,7 +27,7 @@ class TestMeshNetwork(unittest.IsolatedAsyncioTestCase):
     def on_msg(sender, payload):
       received.append((sender, payload))
 
-    proto.set_message_callback(on_msg)
+    proto.add_message_listener(on_msg)
 
     return proto, received
 

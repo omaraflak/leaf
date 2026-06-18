@@ -23,9 +23,9 @@ class FragmentedMesh:
 
   def __init__(self, transceiver: Transceiver, node_id: str, mobile: bool = False):
     self.mesh = Mesh(transceiver, node_id, mobile)
-    self.mesh.set_message_callback(self._on_mesh_message)
+    self.mesh.add_message_listener(self._on_mesh_message)
 
-    self.on_message_callback: Callable[[str, bytes], None] | None = None
+    self._message_listeners: list[Callable[[str, bytes], None]] = []
 
     # Message ID counter for outgoing messages (1 byte, wraps at 256)
     self._next_msg_id = 0
@@ -39,9 +39,13 @@ class FragmentedMesh:
     # Start background cleanup task
     self._fire_and_forget(self._cleanup_incoming_messages_loop())
 
-  def set_message_callback(self, callback: Callable[[str, bytes], None]):
-    """callback(sender_id_str, payload_bytes)"""
-    self.on_message_callback = callback
+  def add_message_listener(self, callback: Callable[[str, bytes], None]):
+    """Adds a message listener. Multiple listeners can coexist."""
+    self._message_listeners.append(callback)
+
+  def remove_message_listener(self, callback: Callable[[str, bytes], None]):
+    """Removes a previously added message listener."""
+    self._message_listeners.remove(callback)
 
   async def send_message(
       self, dest_id: str, data: bytes, timeout: float = 5.0, max_retries: int = 3
@@ -147,8 +151,8 @@ class FragmentedMesh:
           sender_id,
           len(assembled_data),
       )
-      if self.on_message_callback:
-        self.on_message_callback(sender_id, assembled_data)
+      for listener in list(self._message_listeners):
+        listener(sender_id, assembled_data)
 
   async def _cleanup_incoming_messages_loop(self):
     try:

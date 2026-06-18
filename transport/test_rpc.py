@@ -198,20 +198,22 @@ class TestMeshRpc(unittest.IsolatedAsyncioTestCase):
     # Since we set callback *after* server/client are created, we need to make sure
     # they don't break. Or if we register it before:
     # Let's test both directions.
-    node_mesh.set_message_callback(on_raw_msg)
+    node_mesh.add_message_listener(on_raw_msg)
 
     # Now let's try calling ServerB from ClientA
     req = JsonRequest(a=5, b=5)
     resp = await client_a.call("add", req, JsonResponse)
     self.assertEqual(resp.data.get("result"), 10)
 
-    # And verify that a raw non-RPC message can still be received on NodeA
+    # With the multi-listener model, the raw listener sees all messages
+    # (including RPC traffic). Verify the raw test message was received.
     await other_mesh.send_message("NodeA", b"raw test message")
     await asyncio.sleep(0.2)
 
-    self.assertEqual(len(mesh_received), 1)
-    self.assertEqual(mesh_received[0][0], "NodeB")
-    self.assertEqual(mesh_received[0][1], b"raw test message")
+    raw_messages = [(s, p)
+                    for s, p in mesh_received if p == b"raw test message"]
+    self.assertEqual(len(raw_messages), 1)
+    self.assertEqual(raw_messages[0][0], "NodeB")
 
     server_a.close()
     server_b.close()
