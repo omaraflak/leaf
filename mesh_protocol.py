@@ -18,11 +18,11 @@ mobility-aware route management.
 """
 
   MAX_TTL = 10
-  ROUTE_EXPIRY_STATIONARY = 1800.0  # 30 minutes
-  ROUTE_EXPIRY_MOBILE = 60.0  # 1 minute
+  ROUTE_EXPIRY_STATIONARY = 1800.0
+  ROUTE_EXPIRY_MOBILE = 60.0
   ROUTE_CLEANUP_INTERVAL = 10.0
   MOBILITY_HOP_PENALTY = 2
-  BROADCAST_JITTER_S = 0.05
+  BROADCAST_JITTER = 0.05
 
   def __init__(self, transceiver: Transceiver, node_id: str, mobile: bool = False):
     self.transceiver = transceiver
@@ -237,7 +237,7 @@ mobility-aware route management.
     packed_frame = frame_obj.pack()
 
     if next_hop == MeshFrame.BROADCAST_MAC:
-      await asyncio.sleep(random.uniform(0.0, self.BROADCAST_JITTER_S))
+      await asyncio.sleep(random.uniform(0.0, self.BROADCAST_JITTER))
 
     async with self._tx_lock:
 
