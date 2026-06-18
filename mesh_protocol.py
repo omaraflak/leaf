@@ -18,14 +18,11 @@ mobility-aware route management.
 """
 
   MAX_TTL = 10
-
-  # Route expiry durations
   ROUTE_EXPIRY_STATIONARY = 1800.0  # 30 minutes
   ROUTE_EXPIRY_MOBILE = 60.0  # 1 minute
-
-  # When comparing routes, a stationary route is preferred over a mobile
-  # route even if it is up to this many extra hops longer.
+  ROUTE_CLEANUP_INTERVAL = 10.0
   MOBILITY_HOP_PENALTY = 2
+  BROADCAST_JITTER_S = 0.05
 
   def __init__(self, transceiver: Transceiver, node_id: str, mobile: bool = False):
     self.transceiver = transceiver
@@ -60,6 +57,9 @@ mobility-aware route management.
     logger.info("Initialized MeshProtocol node: %s (mobile=%s)",
                 node_id, mobile)
 
+    # Start periodic cleanup of routing table
+    self._fire_and_forget(self._cleanup_routing_table_loop())
+
   def set_message_callback(self, callback: Callable[[str, bytes], None]):
     """callback(sender_id_str, payload_bytes)"""
     self.on_message_callback = callback
@@ -73,7 +73,7 @@ mobility-aware route management.
 
     for attempt in range(max_retries + 1):
       logger.debug("Route discovery attempt %d to %s", attempt, dest_id)
-      next_hop = await self._get_route(dest_bytes, timeout=timeout / 2)
+      next_hop = await self._get_route(dest_bytes, timeout / 2)
       if not next_hop:
         logger.warning(
             "Could not find route to %s on attempt %d", dest_id, attempt
@@ -144,13 +144,19 @@ mobility-aware route management.
         data,
     )
 
+  def close(self):
+    """Closes the protocol, cancelling any background tasks."""
+    logger.info("Closing MeshProtocol node: %s", self.node_id)
+    for task in list(self._background_tasks):
+      task.cancel()
+
   def _fire_and_forget(self, coro):
     """Schedule a coroutine as a background task."""
     task = asyncio.create_task(coro)
     self._background_tasks.add(task)
     task.add_done_callback(self._background_tasks.discard)
 
-  async def _get_route(self, dest: bytes, timeout: float = 2.0) -> bytes | None:
+  async def _get_route(self, dest: bytes, timeout: float) -> bytes | None:
     if dest in self.routing_table:
       if time.time() < self.routing_table[dest][2]:
         logger.debug(
@@ -230,7 +236,11 @@ mobility-aware route management.
     )
     packed_frame = frame_obj.pack()
 
+    if next_hop == MeshFrame.BROADCAST_MAC:
+      await asyncio.sleep(random.uniform(0.0, self.BROADCAST_JITTER_S))
+
     async with self._tx_lock:
+
       # CSMA/CA: Listen Before Talk
       start_time = time.time()
       attempts = 0
@@ -558,3 +568,22 @@ MOBILITY_HOP_PENALTY extra hops for stability."""
                   frame.payload,
               )
           )
+
+  async def _cleanup_routing_table_loop(self):
+    try:
+      while True:
+        await asyncio.sleep(self.ROUTE_CLEANUP_INTERVAL)
+        self._cleanup_routing_table()
+    except asyncio.CancelledError:
+      logger.debug("Routing table cleanup task cancelled")
+
+  def _cleanup_routing_table(self):
+    now = time.time()
+    expired = [
+        dest
+        for dest, (_, _, expiry, _) in self.routing_table.items()
+        if now >= expiry
+    ]
+    for dest in expired:
+      logger.debug("Pruning expired route to %s", dest)
+      self.routing_table.pop(dest, None)
