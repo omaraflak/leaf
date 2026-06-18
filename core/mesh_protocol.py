@@ -12,10 +12,10 @@ logger = logging.getLogger("leaf.mesh")
 
 class MeshProtocol:
   """
-A mesh networking protocol built on top of a raw radio Transceiver.
-Implements AODV-like routing, CSMA/CA, End-to-End ACKs, and
-mobility-aware route management.
-"""
+  A mesh networking protocol built on top of a raw radio Transceiver.
+  Implements AODV-like routing, CSMA/CA, End-to-End ACKs, and
+  mobility-aware route management.
+  """
 
   MAX_TTL = 10
   ROUTE_EXPIRY_STATIONARY_SEC = 1800.0
@@ -302,8 +302,9 @@ mobility-aware route management.
       self, new_hops: int, new_mobile: bool, old_hops: int, old_mobile: bool
   ) -> bool:
     """Determines if a new route is better than an existing one.
-Prefers stationary next-hops over mobile ones, tolerating up to
-MOBILITY_HOP_PENALTY extra hops for stability."""
+    Prefers stationary next-hops over mobile ones, tolerating up to
+    MOBILITY_HOP_PENALTY extra hops for stability.
+    """
     if new_mobile == old_mobile:
       # Same mobility class: prefer fewer hops
       return new_hops < old_hops
