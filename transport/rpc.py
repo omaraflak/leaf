@@ -23,40 +23,40 @@ def register(func: Callable[..., Any]) -> Callable[..., Any]:
 
 def _pack_request(request_id: int, method_name: str, payload: bytes) -> bytes:
   method_bytes = method_name.encode("utf-8")
-  if len(method_bytes) > 65535:
+  if len(method_bytes) > 255:
     raise ValueError("Method name too long")
-  header = struct.pack("!BIH", _MSG_TYPE_REQUEST,
+  header = struct.pack("!BBB", _MSG_TYPE_REQUEST,
                        request_id, len(method_bytes))
   return header + method_bytes + payload
 
 
 def _unpack_request(data: bytes) -> tuple[int, str, bytes]:
-  if len(data) < 7:
+  if len(data) < 3:
     raise ValueError("Request data too short")
-  msg_type, request_id, method_len = struct.unpack("!BIH", data[:7])
+  msg_type, request_id, method_len = struct.unpack("!BBB", data[:3])
   if msg_type != _MSG_TYPE_REQUEST:
     raise ValueError(f"Invalid message type for request: {msg_type}")
-  if len(data) < 7 + method_len:
+  if len(data) < 3 + method_len:
     raise ValueError("Request data incomplete for method name")
-  method_name = data[7: 7 + method_len].decode("utf-8")
-  payload = data[7 + method_len:]
+  method_name = data[3: 3 + method_len].decode("utf-8")
+  payload = data[3 + method_len:]
   return request_id, method_name, payload
 
 
 def _pack_response(request_id: int, success: bool, payload_or_error: bytes) -> bytes:
   status = 0 if success else 1
-  header = struct.pack("!BIB", _MSG_TYPE_RESPONSE, request_id, status)
+  header = struct.pack("!BBB", _MSG_TYPE_RESPONSE, request_id, status)
   return header + payload_or_error
 
 
 def _unpack_response(data: bytes) -> tuple[int, bool, bytes]:
-  if len(data) < 6:
+  if len(data) < 3:
     raise ValueError("Response data too short")
-  msg_type, request_id, status = struct.unpack("!BIB", data[:6])
+  msg_type, request_id, status = struct.unpack("!BBB", data[:3])
   if msg_type != _MSG_TYPE_RESPONSE:
     raise ValueError(f"Invalid message type for response: {msg_type}")
   success = status == 0
-  payload_or_error = data[6:]
+  payload_or_error = data[3:]
   return request_id, success, payload_or_error
 
 
@@ -118,7 +118,7 @@ class MeshRpcServer:
         )
 
   def _on_mesh_message(self, sender_id: str, payload: bytes):
-    if len(payload) >= 7 and payload[0] == _MSG_TYPE_REQUEST:
+    if len(payload) >= 3 and payload[0] == _MSG_TYPE_REQUEST:
       asyncio.create_task(self._handle_request(sender_id, payload))
 
   async def _handle_request(self, sender_id: str, payload: bytes):
@@ -180,7 +180,7 @@ class MeshRpcClient:
       timeout: float = 10.0,
   ) -> T:
     req_id = self._next_request_id
-    self._next_request_id = (self._next_request_id + 1) % (2**32)
+    self._next_request_id = (self._next_request_id + 1) % 256
 
     payload = request.serialize()
     request_data = _pack_request(req_id, method_name, payload)
@@ -214,7 +214,7 @@ class MeshRpcClient:
     self.mesh.remove_message_listener(self._on_mesh_message)
 
   def _on_mesh_message(self, sender_id: str, payload: bytes):
-    if len(payload) >= 6 and payload[0] == _MSG_TYPE_RESPONSE:
+    if len(payload) >= 3 and payload[0] == _MSG_TYPE_RESPONSE:
       try:
         request_id, success, payload_or_error = _unpack_response(payload)
         future = self._pending_requests.pop(request_id, None)
