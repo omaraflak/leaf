@@ -21,8 +21,6 @@ Since physical transceivers (e.g. Ebyte E32 LoRa) have very small internal seria
 * **High Efficiency**: A 10-byte fragment header tracks the packet state, supporting individual fragment acknowledgments and selective retries.
 * **Automatic Purging**: Cleans up incomplete, timed-out chunks after 30 seconds to prevent resource leaks.
 
----
-
 ## Packet Formats
 
 ### 1. `MeshFrame` (Base Frame on the wire)
@@ -53,8 +51,6 @@ When using `FragmentedMeshProtocol`, the first **9 bytes** of the `MeshFrame.pay
 | Message ID | 1 byte | Unsigned Char (`B`) | Unique message identifier (wraps at 256). |
 | Chunk Index | 4 bytes | Unsigned Int (`I`) | Index of this chunk (0-indexed). |
 | Total Chunks | 4 bytes | Unsigned Int (`I`) | Total number of chunks in this message. |
-
----
 
 ## Usage Examples
 
