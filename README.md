@@ -128,7 +128,7 @@ async def main():
     large_payload = b"Hello from A! " * 1000
 
     print("Sending large message from A to B...")
-    # This will be transparently split into 5KB chunks and transmitted
+    # This will be transparently split into chunks and transmitted
     success = await proto_a.send_message("Node_B", large_payload)
 
     if success:
@@ -139,5 +139,3 @@ async def main():
 
 asyncio.run(main())
 ```
-
-
