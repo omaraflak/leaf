@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import unittest
 from core.mock_transceiver import MockMedium, MockTransceiver
 from transport.fragmented_mesh import FragmentedMesh
@@ -7,7 +8,11 @@ from transport.fragmented_mesh import FragmentedMesh
 class TestFragmentedMeshNetwork(unittest.IsolatedAsyncioTestCase):
 
   def setUp(self):
+    logging.disable(logging.CRITICAL)
     self.medium = MockMedium(max_range_m=3000, bytes_per_sec=10000)
+
+  def tearDown(self):
+    logging.disable(logging.NOTSET)
 
   def _create_fragmented_node(self, x, y, name, mobile=False):
     tx = MockTransceiver(self.medium, x=x, y=y, name=name)

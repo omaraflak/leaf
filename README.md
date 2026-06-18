@@ -130,3 +130,76 @@ async def main():
 
 asyncio.run(main())
 ```
+
+### 3. RPC Layer: `MeshRpcServer` & `MeshRpcClient`
+Built on top of `FragmentedMesh`, the RPC layer allows nodes to register asynchronous methods and invoke them remotely.
+
+#### Example 3: RPC Server and Client
+
+```python
+import asyncio
+import json
+from core.mock_transceiver import MockMedium, MockTransceiver
+from transport.fragmented_mesh import FragmentedMesh
+from transport.rpc import Message, MeshRpcServer, MeshRpcClient, register
+
+# Define RPC request/response messages
+class MyRequest(Message):
+    def __init__(self, message: str):
+        self.message = message
+
+    def serialize(self) -> bytes:
+        return json.dumps({"msg": self.message}).encode("utf-8")
+
+    @classmethod
+    def deserialize(cls, data: bytes) -> "MyRequest":
+        parsed = json.loads(data.decode("utf-8"))
+        return cls(parsed["msg"])
+
+class MyResponse(Message):
+    def __init__(self, reply: str):
+        self.reply = reply
+
+    def serialize(self) -> bytes:
+        return json.dumps({"reply": self.reply}).encode("utf-8")
+
+    @classmethod
+    def deserialize(cls, data: bytes) -> "MyResponse":
+        parsed = json.loads(data.decode("utf-8"))
+        return cls(parsed["reply"])
+
+# Implement the Server
+class MyServer(MeshRpcServer):
+    @register
+    async def echo(self, request: MyRequest) -> MyResponse:
+        print(f"Server received: {request.message}")
+        return MyResponse(f"Echo: {request.message}")
+
+async def main():
+    medium = MockMedium(max_range_m=3000, bytes_per_sec=10000)
+
+    # Node Setup
+    tx_server = MockTransceiver(medium, x=0, y=0, name="ServerNode")
+    tx_client = MockTransceiver(medium, x=1000, y=0, name="ClientNode")
+
+    mesh_server = FragmentedMesh(tx_server, "ServerNode")
+    mesh_client = FragmentedMesh(tx_client, "ClientNode")
+
+    # Start Server
+    server = MyServer(mesh_server)
+
+    # Create Client
+    client = MeshRpcClient(mesh_client, "ServerNode")
+
+    # Call method
+    response = await client.call("echo", MyRequest("Hello World!"), MyResponse)
+    print(f"Client received response: {response.reply}")
+
+    server.close()
+    client.close()
+    mesh_server.close()
+    mesh_client.close()
+
+asyncio.run(main())
+```
+

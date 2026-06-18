@@ -10,12 +10,12 @@ from core.mesh import Mesh
 class TestMeshNetwork(unittest.IsolatedAsyncioTestCase):
 
   def setUp(self):
-    # logging.disable(logging.CRITICAL)
+    logging.disable(logging.CRITICAL)
     # Create a fast medium for testing (10000 bytes/sec means very short delays)
     self.medium = MockMedium(max_range_m=3000, bytes_per_sec=10000)
 
   def tearDown(self):
-    pass
+    logging.disable(logging.NOTSET)
 
   def _create_node(self, x, y, name, mobile=False):
     tx = MockTransceiver(self.medium, x=x, y=y, name=name)
