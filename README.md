@@ -60,8 +60,8 @@ Use this for sending small, lightweight payloads (under 65KB, or within physical
 
 ```python
 import asyncio
-from mock_transceiver import MockMedium, MockTransceiver
-from mesh_protocol import MeshProtocol
+from core.mock_transceiver import MockMedium, MockTransceiver
+from core.mesh_protocol import MeshProtocol
 
 async def main():
     medium = MockMedium(max_range_m=3000, bytes_per_sec=1000)
@@ -97,8 +97,8 @@ Use this to transmit large payloads (e.g. photos, log files, sensor dumps) safel
 
 ```python
 import asyncio
-from mock_transceiver import MockMedium, MockTransceiver
-from fragmented_mesh import FragmentedMeshProtocol
+from core.mock_transceiver import MockMedium, MockTransceiver
+from transport.fragmented_mesh import FragmentedMeshProtocol
 
 async def main():
     # Setup medium with a faster transmission speed for large data simulations

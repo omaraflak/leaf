@@ -4,8 +4,8 @@ import random
 import struct
 import time
 from typing import Callable
-from frame import FrameType, FrameFlags, MeshFrame
-from transceiver import Transceiver
+from core.frame import FrameType, FrameFlags, MeshFrame
+from core.transceiver import Transceiver
 
 logger = logging.getLogger("leaf.mesh")
 

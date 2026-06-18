@@ -2,7 +2,7 @@ import asyncio
 import logging
 import random
 from typing import Callable, Awaitable
-from transceiver import Transceiver
+from core.transceiver import Transceiver
 
 logger = logging.getLogger("leaf.mock_transceiver")
 

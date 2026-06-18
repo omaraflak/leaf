@@ -4,8 +4,8 @@ import struct
 import time
 from typing import Callable
 
-from mesh_protocol import MeshProtocol
-from transceiver import Transceiver
+from core.mesh_protocol import MeshProtocol
+from core.transceiver import Transceiver
 
 logger = logging.getLogger("leaf.fragmented_mesh")
 

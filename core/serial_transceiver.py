@@ -3,8 +3,8 @@ import logging
 import threading
 import time
 from typing import Callable, Awaitable, Optional
-from transceiver import Transceiver
-from frame import MeshFrame
+from core.transceiver import Transceiver
+from core.frame import MeshFrame
 
 try:
   import serial
