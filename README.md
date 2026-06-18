@@ -216,20 +216,21 @@ async def main():
 asyncio.run(main())
 ```
 
-### 4. TCP Tunnel: `TcpMeshTunnel`
-Bridges a local TCP port to a remote mesh node. When a TCP client connects, all data is forwarded bidirectionally between the TCP socket and the mesh. This allows standard TCP applications (SSH, HTTP, serial monitors) to communicate transparently over the radio mesh.
+### 4. TCP Layer: `MeshTcpServer` & `MeshTcpClient`
+Bridges TCP connections over the mesh, allowing standard TCP applications (SSH, HTTP, serial monitors) to communicate transparently over radio.
 
-Uses the base `Mesh` layer directly. Each TCP read (capped at `CHUNK_SIZE = 200` bytes) is sent as a single mesh frame.
+Uses the base `Mesh` layer directly. Each TCP read is sent as a single mesh frame.
 
-* **Single Client**: Only one TCP connection is active at a time. Additional connections are rejected until the current one disconnects.
-* **Bidirectional Forwarding**: TCP → mesh and mesh → TCP.
-* **Reconnectable**: After a client disconnects, a new one can connect immediately.
+* **`MeshTcpServer`**: Starts a TCP server. Use on the side where an application (e.g. a browser) initiates connections.
+* **`MeshTcpClient`**: Connects to a local TCP service when mesh data arrives. Use on the side where a service (e.g. an HTTP server) is running.
 
 ```python
 import asyncio
+from http.server import HTTPServer, SimpleHTTPRequestHandler
+from threading import Thread
 from core.mock_transceiver import MockMedium, MockTransceiver
 from core.mesh import Mesh
-from transport.tcp_tunnel import TcpMeshTunnel
+from transport.tcp import MeshTcpServer, MeshTcpClient
 
 async def main():
     medium = MockMedium(max_range_m=3000, bytes_per_sec=50000)
@@ -240,27 +241,23 @@ async def main():
     mesh_a = Mesh(tx_a, "Node_A")
     mesh_b = Mesh(tx_b, "Node_B")
 
-    # Start tunnels: each bridges its local TCP port to the other mesh node
-    tunnel_a = TcpMeshTunnel(mesh_a, remote_node_id="Node_B", tcp_port=8001)
-    tunnel_b = TcpMeshTunnel(mesh_b, remote_node_id="Node_A", tcp_port=8002)
-    await tunnel_a.start()
-    await tunnel_b.start()
+    # Node B runs an HTTP server on port 8080
+    httpd = HTTPServer(("127.0.0.1", 8080), SimpleHTTPRequestHandler)
+    Thread(target=httpd.serve_forever, daemon=True).start()
 
-    # Connect TCP clients to each side
-    reader_a, writer_a = await asyncio.open_connection("127.0.0.1", 8001)
-    reader_b, writer_b = await asyncio.open_connection("127.0.0.1", 8002)
+    # Node A: browser connects here
+    server = MeshTcpServer(mesh_a, "Node_B", tcp_port=9090)
+    # Node B: forwards mesh traffic to the local HTTP server
+    client = MeshTcpClient(mesh_b, "Node_A", tcp_port=8080)
 
-    # Data sent to port 8001 arrives at port 8002 (via mesh)
-    writer_a.write(b"Hello over radio!")
-    await writer_a.drain()
-    await asyncio.sleep(0.5)
-    data = await reader_b.read(4096)
-    print(f"Received on side B: {data}")
+    await server.start()
 
-    writer_a.close()
-    writer_b.close()
-    tunnel_a.close()
-    tunnel_b.close()
+    # Browser on Node A opens http://localhost:9090
+    # → server sends request over mesh → client forwards to localhost:8080
+    # → HTTP server responds → client sends response over mesh → server → browser
+
+    server.close()
+    client.close()
     mesh_a.close()
     mesh_b.close()
 
