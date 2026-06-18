@@ -4,14 +4,14 @@ import struct
 import time
 from typing import Callable
 
-from core.mesh_protocol import MeshProtocol
+from core.mesh import Mesh
 from core.transceiver import Transceiver
 
 logger = logging.getLogger("leaf.fragmented_mesh")
 
 
-class FragmentedMeshProtocol:
-  """A protocol layer built on top of MeshProtocol that supports sending
+class FragmentedMesh:
+  """A protocol layer built on top of Mesh that supports sending
 
   arbitrarily large payloads by fragmenting them into chunks, and reassembling
   them at the destination.
@@ -22,7 +22,7 @@ class FragmentedMeshProtocol:
   CLEANUP_INTERVAL_SEC = 10.0
 
   def __init__(self, transceiver: Transceiver, node_id: str, mobile: bool = False):
-    self.mesh = MeshProtocol(transceiver, node_id, mobile)
+    self.mesh = Mesh(transceiver, node_id, mobile)
     self.mesh.set_message_callback(self._on_mesh_message)
 
     self.on_message_callback: Callable[[str, bytes], None] | None = None
@@ -64,7 +64,7 @@ class FragmentedMeshProtocol:
       header = struct.pack("!B I I", msg_id, chunk_idx, total_chunks)
       chunk_payload = header + chunk_data
 
-      # Send chunk. Since it is unicast, MeshProtocol guarantees delivery per chunk (with ACKs).
+      # Send chunk. Since it is unicast, Mesh guarantees delivery per chunk (with ACKs).
       success = await self.mesh.send_message(
           dest_id, chunk_payload, timeout, max_retries
       )

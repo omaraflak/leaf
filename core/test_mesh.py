@@ -4,7 +4,7 @@ import time
 import unittest
 from core.frame import FrameType, MeshFrame
 from core.mock_transceiver import MockMedium, MockTransceiver
-from core.mesh_protocol import MeshProtocol
+from core.mesh import Mesh
 
 
 class TestMeshNetwork(unittest.IsolatedAsyncioTestCase):
@@ -19,7 +19,7 @@ class TestMeshNetwork(unittest.IsolatedAsyncioTestCase):
 
   def _create_node(self, x, y, name, mobile=False):
     tx = MockTransceiver(self.medium, x=x, y=y, name=name)
-    proto = MeshProtocol(tx, name, mobile=mobile)
+    proto = Mesh(tx, name, mobile=mobile)
 
     # Track received messages
     received = []
@@ -241,7 +241,7 @@ class TestMeshNetwork(unittest.IsolatedAsyncioTestCase):
     dest_bytes = "Node_B".encode("utf-8")[:8].ljust(8, b"\x00")
     expiry = proto_a.routing_table[dest_bytes][2]
     self.assertAlmostEqual(
-        expiry, time.time() + MeshProtocol.ROUTE_EXPIRY_STATIONARY_SEC, delta=5.0
+        expiry, time.time() + Mesh.ROUTE_EXPIRY_STATIONARY_SEC, delta=5.0
     )
 
     # Stationary -> mobile: short expiry
@@ -254,7 +254,7 @@ class TestMeshNetwork(unittest.IsolatedAsyncioTestCase):
     dest_bytes = "Node_D".encode("utf-8")[:8].ljust(8, b"\x00")
     expiry = proto_c.routing_table[dest_bytes][2]
     self.assertAlmostEqual(
-        expiry, time.time() + MeshProtocol.ROUTE_EXPIRY_MOBILE_SEC, delta=5.0
+        expiry, time.time() + Mesh.ROUTE_EXPIRY_MOBILE_SEC, delta=5.0
     )
 
   async def test_route_preference_stationary_over_mobile(self):

@@ -10,7 +10,7 @@ from core.transceiver import Transceiver
 logger = logging.getLogger("leaf.mesh")
 
 
-class MeshProtocol:
+class Mesh:
   """
   A mesh networking protocol built on top of a raw radio Transceiver.
   Implements AODV-like routing, CSMA/CA, End-to-End ACKs, and
@@ -54,7 +54,7 @@ class MeshProtocol:
 
     self._tx_lock = asyncio.Lock()
 
-    logger.info("Initialized MeshProtocol node: %s (mobile=%s)",
+    logger.info("Initialized Mesh node: %s (mobile=%s)",
                 node_id, mobile)
 
     # Start periodic cleanup of routing table
@@ -168,7 +168,7 @@ class MeshProtocol:
 
   def close(self):
     """Closes the protocol, cancelling any background tasks."""
-    logger.info("Closing MeshProtocol node: %s", self.node_id)
+    logger.info("Closing Mesh node: %s", self.node_id)
     for task in list(self._background_tasks):
       task.cancel()
 

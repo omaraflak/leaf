@@ -1,7 +1,7 @@
 import asyncio
 import unittest
 from core.mock_transceiver import MockMedium, MockTransceiver
-from transport.fragmented_mesh import FragmentedMeshProtocol
+from transport.fragmented_mesh import FragmentedMesh
 
 
 class TestFragmentedMeshNetwork(unittest.IsolatedAsyncioTestCase):
@@ -11,7 +11,7 @@ class TestFragmentedMeshNetwork(unittest.IsolatedAsyncioTestCase):
 
   def _create_fragmented_node(self, x, y, name, mobile=False):
     tx = MockTransceiver(self.medium, x=x, y=y, name=name)
-    proto = FragmentedMeshProtocol(tx, name, mobile=mobile)
+    proto = FragmentedMesh(tx, name, mobile=mobile)
 
     received = []
 
@@ -22,8 +22,8 @@ class TestFragmentedMeshNetwork(unittest.IsolatedAsyncioTestCase):
     return proto, received
 
   async def test_fragmentation_direct(self):
-    original_size = FragmentedMeshProtocol.FRAGMENT_SIZE
-    FragmentedMeshProtocol.FRAGMENT_SIZE = 100
+    original_size = FragmentedMesh.FRAGMENT_SIZE
+    FragmentedMesh.FRAGMENT_SIZE = 100
     try:
       proto_a, rec_a = self._create_fragmented_node(0, 0, "Node_A")
       proto_b, rec_b = self._create_fragmented_node(1000, 0, "Node_B")
@@ -43,11 +43,11 @@ class TestFragmentedMeshNetwork(unittest.IsolatedAsyncioTestCase):
       proto_a.close()
       proto_b.close()
     finally:
-      FragmentedMeshProtocol.FRAGMENT_SIZE = original_size
+      FragmentedMesh.FRAGMENT_SIZE = original_size
 
   async def test_fragmentation_multihop(self):
-    original_size = FragmentedMeshProtocol.FRAGMENT_SIZE
-    FragmentedMeshProtocol.FRAGMENT_SIZE = 100
+    original_size = FragmentedMesh.FRAGMENT_SIZE
+    FragmentedMesh.FRAGMENT_SIZE = 100
     try:
       proto_a, rec_a = self._create_fragmented_node(0, 0, "Node_A")
       proto_b, rec_b = self._create_fragmented_node(2000, 0, "Node_B")
@@ -68,7 +68,7 @@ class TestFragmentedMeshNetwork(unittest.IsolatedAsyncioTestCase):
       proto_b.close()
       proto_c.close()
     finally:
-      FragmentedMeshProtocol.FRAGMENT_SIZE = original_size
+      FragmentedMesh.FRAGMENT_SIZE = original_size
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ A lightweight Python library for establishing ad-hoc, peer-to-peer mesh networks
 
 ## Architecture Layers
 
-### 1. Base Layer: `MeshProtocol`
+### 1. Base Layer: `Mesh`
 The base layer manages point-to-point and multi-hop delivery of packets. It is designed to work in highly dynamic environments where nodes can move.
 
 * **CSMA/CA (Carrier-Sense Multiple Access)**: Lists to the radio carrier before transmitting and implements random backoffs to prevent frame collisions.
@@ -13,10 +13,10 @@ The base layer manages point-to-point and multi-hop delivery of packets. It is d
 * **Mobility-Aware Route Expiry**: Distinguishes between stationary and mobile nodes. Routes through stationary nodes last **30 minutes**, while routes through mobile nodes expire in **1 minute**.
 * **Payload Constraints**: Restricts individual frames to a maximum size of **65,535 bytes** (governed by the 2-byte length field).
 
-### 2. Transport Layer: `FragmentedMeshProtocol`
+### 2. Transport Layer: `FragmentedMesh`
 Since physical transceivers (e.g. Ebyte E32 LoRa) have very small internal serial buffers (often 512 bytes) and low-rate links, transmitting a single large packet will cause buffer overflows or extremely high packet loss rates.
 
-`FragmentedMeshProtocol` wraps `MeshProtocol` to handle large transfers:
+`FragmentedMesh` wraps `Mesh` to handle large transfers:
 * **Automatic Segmentation**: Fragments arbitrary-sized data into small chunks (default `FRAGMENT_SIZE = 200` bytes).
 * **High Efficiency**: A 10-byte fragment header tracks the packet state, supporting individual fragment acknowledgments and selective retries.
 * **Automatic Purging**: Cleans up incomplete, timed-out chunks after 30 seconds to prevent resource leaks.
@@ -44,7 +44,7 @@ Total base frame overhead: **43 bytes** + 4 bytes CRC.
 
 ### 2. Fragment Header (Within `MeshFrame.payload`)
 
-When using `FragmentedMeshProtocol`, the first **9 bytes** of the `MeshFrame.payload` are consumed by the fragment header:
+When using `FragmentedMesh`, the first **9 bytes** of the `MeshFrame.payload` are consumed by the fragment header:
 
 | Field | Size | Type | Description |
 |---|---|---|---|
@@ -54,14 +54,14 @@ When using `FragmentedMeshProtocol`, the first **9 bytes** of the `MeshFrame.pay
 
 ## Usage Examples
 
-### Example 1: Direct Mesh Messaging (`MeshProtocol`)
+### Example 1: Direct Mesh Messaging (`Mesh`)
 
 Use this for sending small, lightweight payloads (under 65KB, or within physical hardware constraints) directly.
 
 ```python
 import asyncio
 from core.mock_transceiver import MockMedium, MockTransceiver
-from core.mesh_protocol import MeshProtocol
+from core.mesh import Mesh
 
 async def main():
     medium = MockMedium(max_range_m=3000, bytes_per_sec=1000)
@@ -71,8 +71,8 @@ async def main():
     tx_b = MockTransceiver(medium, x=1000, y=0, name="Node_B")
 
     # Initialize protocol nodes
-    proto_a = MeshProtocol(tx_a, "Node_A")
-    proto_b = MeshProtocol(tx_b, "Node_B", mobile=True)
+    proto_a = Mesh(tx_a, "Node_A")
+    proto_b = Mesh(tx_b, "Node_B", mobile=True)
 
     # Listen for messages
     def on_message(sender_id, payload):
@@ -91,14 +91,14 @@ async def main():
 asyncio.run(main())
 ```
 
-### Example 2: Sending Large Payloads (`FragmentedMeshProtocol`)
+### Example 2: Sending Large Payloads (`FragmentedMesh`)
 
 Use this to transmit large payloads (e.g. photos, log files, sensor dumps) safely over low-bandwidth physical radio modules (like LoRa modules with 512-byte serial buffers).
 
 ```python
 import asyncio
 from core.mock_transceiver import MockMedium, MockTransceiver
-from transport.fragmented_mesh import FragmentedMeshProtocol
+from transport.fragmented_mesh import FragmentedMesh
 
 async def main():
     # Setup medium with a faster transmission speed for large data simulations
@@ -108,8 +108,8 @@ async def main():
     tx_b = MockTransceiver(medium, x=1000, y=0, name="Node_B")
 
     # Setup nodes using the fragmented wrapper
-    proto_a = FragmentedMeshProtocol(tx_a, "Node_A")
-    proto_b = FragmentedMeshProtocol(tx_b, "Node_B")
+    proto_a = FragmentedMesh(tx_a, "Node_A")
+    proto_b = FragmentedMesh(tx_b, "Node_B")
 
     def on_message(sender_id, payload):
         print(f"Assembled and received {len(payload)} bytes from {sender_id}!")
