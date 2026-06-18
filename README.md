@@ -98,3 +98,46 @@ async def main():
 asyncio.run(main())
 ```
 
+### Sending Large Messages (Fragmentation)
+
+Raw `MeshProtocol` frames have a payload limit of **65,535 bytes**. The `FragmentedMeshProtocol` class is built on top of `MeshProtocol` to support sending arbitrarily large payloads. It automatically splits your data into small fragments, manages the transmission sequence, and reassembles them at the destination.
+
+#### Fragmented Minimal Example
+
+```python
+import asyncio
+from mock_transceiver import MockMedium, MockTransceiver
+from fragmented_mesh import FragmentedMeshProtocol
+
+async def main():
+    medium = MockMedium(max_range_m=3000, bytes_per_sec=50000)
+
+    tx_a = MockTransceiver(medium, x=0, y=0, name="Node_A")
+    tx_b = MockTransceiver(medium, x=1000, y=0, name="Node_B")
+
+    # 1. Instantiate FragmentedMeshProtocol instead of MeshProtocol
+    proto_a = FragmentedMeshProtocol(tx_a, "Node_A")
+    proto_b = FragmentedMeshProtocol(tx_b, "Node_B")
+
+    def on_message(sender_id, payload):
+        print(f"Received {len(payload)} bytes from {sender_id}")
+
+    proto_b.set_message_callback(on_message)
+
+    # 2. Generate a large payload (e.g. 15 KB)
+    large_payload = b"Hello from A! " * 1000
+
+    print("Sending large message from A to B...")
+    # This will be transparently split into 5KB chunks and transmitted
+    success = await proto_a.send_message("Node_B", large_payload)
+
+    if success:
+        print("Large message delivered successfully!")
+
+    proto_a.close()
+    proto_b.close()
+
+asyncio.run(main())
+```
+
+

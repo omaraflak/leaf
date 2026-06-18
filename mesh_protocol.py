@@ -67,7 +67,19 @@ mobility-aware route management.
   async def send_message(
       self, dest_id: str, data: bytes, timeout: float = 5.0, max_retries: int = 3
   ) -> bool:
-    """Sends data to a specific destination over the mesh and waits for an ACK. Returns True if delivered."""
+    """Sends data to a specific destination over the mesh and waits for an ACK.
+
+    The payload size (data) must be no more than 65535 bytes (less than 2^16).
+
+    Returns:
+      True if delivered, False otherwise.
+    Raises:
+      ValueError: If data size exceeds 65535 bytes.
+    """
+    if len(data) > 65535:
+      raise ValueError(
+          "Payload size exceeds maximum frame limit of 65535 bytes")
+
     dest_bytes = dest_id.encode("utf-8")[:8].ljust(8, b"\x00")
     logger.info("Sending message to %s (%s)", dest_id, dest_bytes)
 
@@ -129,7 +141,17 @@ mobility-aware route management.
     return False
 
   async def broadcast_message(self, data: bytes):
-    """Sends data to all nodes."""
+    """Sends data to all nodes.
+
+    The payload size (data) must be no more than 65535 bytes (less than 2^16).
+
+    Raises:
+      ValueError: If data size exceeds 65535 bytes.
+    """
+    if len(data) > 65535:
+      raise ValueError(
+          "Payload size exceeds maximum frame limit of 65535 bytes")
+
     seq = self.seq_num
     self.seq_num += 1
     logger.info("Broadcasting message, seq %d", seq)
