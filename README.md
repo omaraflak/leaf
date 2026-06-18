@@ -2,6 +2,27 @@
 
 A lightweight Python protocol for bringing up a peer-to-peer mesh network over raw radio transceivers. 
 
+## Frame Format
+
+Every packet on the wire follows this structure:
+
+| Field | Size | Description |
+|---|---|---|
+| Magic | 2 bytes | Frame delimiter (`0xAABB`). Used to locate frame boundaries in a byte stream. |
+| Type | 1 byte | Frame type: `DATA` (1), `ACK` (2), `RREQ` (3), `RREP` (4). |
+| TTL | 1 byte | Time to live. Decremented at each hop; frame is dropped when it reaches 0. |
+| Seq | 4 bytes | Sequence number. Monotonically increasing per node, used for deduplication and ACK matching. |
+| OrigSrc | 8 bytes | Node ID of the original sender. |
+| FinalDest | 8 bytes | Node ID of the final destination (or `0xFF * 8` for broadcast). |
+| Transmitter | 8 bytes | Node ID of the last-hop transmitter (changes at each relay). |
+| NextHop | 8 bytes | Node ID of the intended next-hop recipient (or `0xFF * 8` for broadcast). |
+| Flags | 1 byte | Bit field. Bit 0: transmitter is stationary (`STATIONARY = 0x00`) or mobile (`MOBILE = 0x01`). |
+| PayloadLen | 2 bytes | Length of the payload in bytes. |
+| Payload | variable | Application data (for `DATA`/`ACK`) or target node ID (for `RREQ`/`RREP`). |
+| CRC32 | 4 bytes | CRC-32 checksum over the header + payload (excludes the CRC field itself). |
+
+Total header size: **43 bytes** + payload + 4 bytes CRC.
+
 ## How it works
 
 The protocol combines several techniques to deliver messages reliably across a network of nodes that can only talk to their immediate neighbors.
@@ -18,7 +39,7 @@ Instead of blindly flooding data packets everywhere, nodes establish precise pat
 - **Route Reply (RREP)**: When the destination hears the RREQ, it sends an RREP back along the discovered path.
 - Once the path is established, DATA packets are sent *only* along that precise chain of nodes. Intermediate nodes act as relays.
 
-Routes are cached for 5 minutes. If a route expires or breaks (detected by a failed ACK), the node automatically re-discovers a new path.
+Routes are cached and expire automatically (see Mobility-Aware Routing below). If a route expires or breaks (detected by a failed ACK), the node re-discovers a new path.
 
 ### End-to-End ACKs with Retries
 
@@ -31,6 +52,13 @@ Every frame carries an `(origin, sequence_number, type)` tuple. Nodes track rece
 ### Route Discovery Coalescing
 
 If multiple messages target the same destination before a route is established, only a single RREQ is broadcast. All pending senders wait on the same discovery and share the result, avoiding redundant floods.
+
+### Mobility-Aware Routing
+
+Each node declares itself as either **stationary** or **mobile** at creation time. This flag is carried in every frame header and used to make smarter routing decisions:
+
+- **Adaptive route expiry**: Routes through stationary nodes are cached for 30 minutes, while routes through mobile nodes expire after just 1 minute. This avoids wasting bandwidth on repeated discoveries for stable links, while keeping routes fresh for nodes that move.
+- **Route preference**: When multiple paths to a destination are discovered, the protocol prefers routes through stationary relays — even if they are up to 2 hops longer — because they are more stable. A 3-hop path through fixed infrastructure is more reliable than a 2-hop path through a moving device.
 
 ## Minimal Example
 
@@ -49,8 +77,8 @@ async def main():
     tx_a = MockTransceiver(medium, x=0, y=0, name="Node_A")
     tx_b = MockTransceiver(medium, x=1000, y=0, name="Node_B")
 
-    proto_a = MeshProtocol(tx_a, "Node_A")
-    proto_b = MeshProtocol(tx_b, "Node_B")
+    proto_a = MeshProtocol(tx_a, "Node_A")  # stationary by default
+    proto_b = MeshProtocol(tx_b, "Node_B", mobile=True)  # mobile node
 
     # 3. Setup a callback to receive messages
     def on_message(sender_id, payload):

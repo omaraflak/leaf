@@ -17,9 +17,9 @@ class TestMeshNetwork(unittest.IsolatedAsyncioTestCase):
   def tearDown(self):
     logging.disable(logging.NOTSET)
 
-  def _create_node(self, x, y, name):
+  def _create_node(self, x, y, name, mobile=False):
     tx = MockTransceiver(self.medium, x=x, y=y, name=name)
-    proto = MeshProtocol(tx, name)
+    proto = MeshProtocol(tx, name, mobile=mobile)
 
     # Track received messages
     received = []
@@ -228,6 +228,50 @@ class TestMeshNetwork(unittest.IsolatedAsyncioTestCase):
     # With coalescing, A should only transmit 1 RREQ.
     self.assertEqual(
         rreq_count, 1, f"Expected exactly 1 RREQ broadcast, got {rreq_count}")
+
+  async def test_adaptive_route_expiry(self):
+    # Stationary -> stationary: long expiry
+    proto_a, _ = self._create_node(0, 0, "Node_A")
+    proto_b, _ = self._create_node(1000, 0, "Node_B")
+
+    success = await proto_a.send_message("Node_B", b"hi", timeout=2.0)
+    self.assertTrue(success)
+
+    dest_bytes = "Node_B".encode('utf-8')[:8].ljust(8, b'\x00')
+    expiry = proto_a.routing_table[dest_bytes][2]
+    self.assertAlmostEqual(
+        expiry, time.time() + MeshProtocol.ROUTE_EXPIRY_STATIONARY, delta=5.0)
+
+    # Stationary -> mobile: short expiry
+    proto_c, _ = self._create_node(0, 0, "Node_C")
+    proto_d, _ = self._create_node(1000, 0, "Node_D", mobile=True)
+
+    success = await proto_c.send_message("Node_D", b"hi", timeout=2.0)
+    self.assertTrue(success)
+
+    dest_bytes = "Node_D".encode('utf-8')[:8].ljust(8, b'\x00')
+    expiry = proto_c.routing_table[dest_bytes][2]
+    self.assertAlmostEqual(
+        expiry, time.time() + MeshProtocol.ROUTE_EXPIRY_MOBILE, delta=5.0)
+
+  async def test_route_preference_stationary_over_mobile(self):
+    proto_a, _ = self._create_node(0, 0, "Node_A")
+
+    # _is_better_route(new_hops, new_mobile, old_hops, old_mobile)
+    # Stationary should replace mobile at same hop count
+    self.assertTrue(proto_a._is_better_route(2, False, 2, True))
+    # Mobile should NOT replace stationary at same hop count
+    self.assertFalse(proto_a._is_better_route(2, True, 2, False))
+    # Stationary should replace mobile even with 2 extra hops
+    self.assertTrue(proto_a._is_better_route(4, False, 2, True))
+    # Stationary should NOT replace mobile with 3 extra hops
+    self.assertFalse(proto_a._is_better_route(5, False, 2, True))
+    # Mobile should replace stationary only if significantly shorter
+    self.assertTrue(proto_a._is_better_route(1, True, 4, False))
+    self.assertFalse(proto_a._is_better_route(2, True, 4, False))
+    # Same class: fewer hops wins
+    self.assertTrue(proto_a._is_better_route(2, False, 3, False))
+    self.assertFalse(proto_a._is_better_route(3, False, 3, False))
 
 
 if __name__ == "__main__":

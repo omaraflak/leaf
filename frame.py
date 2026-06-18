@@ -10,6 +10,11 @@ class FrameType:
   RREP = 4
 
 
+class FrameFlags:
+  STATIONARY = 0x00
+  MOBILE = 0x01
+
+
 class MeshFrame:
   """
   Utility class to encapsulate building, parsing, and verifying
@@ -17,8 +22,9 @@ class MeshFrame:
   """
 
   MAGIC = b"\xaa\xbb"
-  # Format: MAGIC (2), Type (1), TTL (1), Seq (4), OrigSrc (8), FinalDest (8), Transmitter (8), NextHop (8), PayloadLen (2)
-  HEADER_FMT = "!2s B B I 8s 8s 8s 8s H"
+  # Format: MAGIC (2), Type (1), TTL (1), Seq (4), OrigSrc (8), FinalDest (8),
+  #         Transmitter (8), NextHop (8), Flags (1), PayloadLen (2)
+  HEADER_FMT = "!2s B B I 8s 8s 8s 8s B H"
   HEADER_SIZE = struct.calcsize(HEADER_FMT)
 
   def __init__(
@@ -31,6 +37,7 @@ class MeshFrame:
       transmitter: bytes,
       next_hop: bytes,
       payload: bytes,
+      flags: int,
   ):
     self.frame_type = frame_type
     self.ttl = ttl
@@ -40,6 +47,7 @@ class MeshFrame:
     self.transmitter = transmitter
     self.next_hop = next_hop
     self.payload = payload
+    self.flags = flags
 
   def pack(self) -> bytes:
     payload_len = len(self.payload)
@@ -53,6 +61,7 @@ class MeshFrame:
         self.final_dest,
         self.transmitter,
         self.next_hop,
+        self.flags,
         payload_len,
     )
     frame_without_crc = header + self.payload
@@ -79,6 +88,7 @@ class MeshFrame:
           final_dest,
           transmitter,
           next_hop,
+          flags,
           payload_len,
       ) = unpacked
     except struct.error:
@@ -100,7 +110,8 @@ class MeshFrame:
       return None  # Checksum failed
 
     return cls(
-        f_type, ttl, seq, orig_src, final_dest, transmitter, next_hop, payload
+        f_type, ttl, seq, orig_src, final_dest, transmitter, next_hop,
+        payload, flags
     )
 
   @classmethod
@@ -130,7 +141,7 @@ class MeshFrame:
 
     try:
       header_data = struct.unpack(cls.HEADER_FMT, buffer[: cls.HEADER_SIZE])
-      payload_len = header_data[8]
+      payload_len = header_data[9]
       total_frame_size = cls.HEADER_SIZE + payload_len + 4
 
       if len(buffer) < total_frame_size:
