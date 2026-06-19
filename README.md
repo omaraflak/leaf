@@ -222,7 +222,7 @@ Bridges TCP connections over the mesh, allowing standard TCP applications (SSH, 
 Uses the base `Mesh` layer directly. Each TCP read is sent as a single mesh frame.
 
 * **`MeshTcpServer`**: Starts a TCP server. Use on the side where an application (e.g. a browser) initiates connections.
-* **`MeshTcpClient`**: Connects to a local TCP service when mesh data arrives. Use on the side where a service (e.g. an HTTP server) is running.
+* **`MeshTcpClient`**: Connects to a local TCP service when mesh data arrives. Use on the side where a service (e.g. an HTTP server) is running. It handles multiple concurrent connections from all nodes in the mesh dynamically.
 
 ```python
 import asyncio
@@ -247,8 +247,8 @@ async def main():
 
     # Node A: browser connects here
     server = MeshTcpServer(mesh_a, "Node_B", tcp_port=9090)
-    # Node B: forwards mesh traffic to the local HTTP server
-    client = MeshTcpClient(mesh_b, "Node_A", tcp_port=8080)
+    # Node B: forwards mesh traffic to the local HTTP server (automatically handles all source nodes)
+    client = MeshTcpClient(mesh_b, tcp_port=8080)
 
     await server.start()
 
@@ -261,5 +261,9 @@ async def main():
     mesh_a.close()
     mesh_b.close()
 
-asyncio.run(main())
+async def run():
+    await main()
+
+if __name__ == "__main__":
+    asyncio.run(main())
 ```

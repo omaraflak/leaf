@@ -256,6 +256,64 @@ class TestMeshTcpClient(unittest.IsolatedAsyncioTestCase):
     client.close()
     echo_server.close()
 
+  async def test_multiple_nodes_concurrent(self):
+    """MeshTcpClient handles concurrent connections from multiple nodes."""
+    mesh_a = self._create_node("NodeA", 0, 0)
+    mesh_b = self._create_node("NodeB", 50, 0)
+    mesh_c = self._create_node("NodeC", 100, 0)  # Client side
+
+    async def handle_echo(reader, writer):
+      while True:
+        data = await reader.read(4096)
+        if not data:
+          break
+        writer.write(data)
+        await writer.drain()
+      writer.close()
+
+    echo_server = await asyncio.start_server(handle_echo, "127.0.0.1", 0)
+    echo_port = echo_server.sockets[0].getsockname()[1]
+
+    # Two servers forwarding to NodeC
+    server_a = MeshTcpServer(mesh_a, "NodeC", tcp_port=0)
+    server_b = MeshTcpServer(mesh_b, "NodeC", tcp_port=0)
+
+    # Client that accepts connections from both NodeA and NodeB
+    client_c = MeshTcpClient(mesh_c, tcp_port=echo_port)
+
+    await server_a.start()
+    await server_b.start()
+    port_a = server_a._server.sockets[0].getsockname()[1]
+    port_b = server_b._server.sockets[0].getsockname()[1]
+
+    # Open TCP connections to both servers
+    reader_a, writer_a = await asyncio.open_connection("127.0.0.1", port_a)
+    reader_b, writer_b = await asyncio.open_connection("127.0.0.1", port_b)
+    await asyncio.sleep(0.1)
+
+    # Send data concurrently
+    writer_a.write(b"data_from_A")
+    await writer_a.drain()
+
+    writer_b.write(b"data_from_B")
+    await writer_b.drain()
+
+    await asyncio.sleep(0.5)
+
+    res_a = await asyncio.wait_for(reader_a.read(4096), timeout=2.0)
+    res_b = await asyncio.wait_for(reader_b.read(4096), timeout=2.0)
+
+    self.assertEqual(res_a, b"data_from_A")
+    self.assertEqual(res_b, b"data_from_B")
+
+    # Clean up
+    writer_a.close()
+    writer_b.close()
+    server_a.close()
+    server_b.close()
+    client_c.close()
+    echo_server.close()
+
 
 if __name__ == "__main__":
   unittest.main()
