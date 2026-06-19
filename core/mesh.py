@@ -129,15 +129,19 @@ class Mesh:
         return True
       except asyncio.TimeoutError:
         logger.warning(
-            "Timeout waiting for ACK for msg seq %d to %s. "
-            "Clearing cached route.",
+            "Timeout waiting for ACK for msg seq %d to %s.",
             seq,
             dest_id,
         )
-        # If ACK times out, the route might be broken.
-        # Delete it to force a new RREQ.
-        self.routing_table.pop(dest_bytes, None)
         self.pending_acks.pop(msg_id, None)
+        # Clear the route on the second consecutive timeout for this message,
+        # to allow at least one retry on the cached route before forcing route discovery.
+        if attempt >= 1:
+          logger.warning(
+              "Multiple timeouts for msg to %s. Clearing cached route.",
+              dest_id,
+          )
+          self.routing_table.pop(dest_bytes, None)
 
     logger.error(
         "Failed to deliver message to %s after %d attempts", dest_id, max_retries
